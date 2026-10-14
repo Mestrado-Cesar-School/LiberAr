@@ -4,22 +4,18 @@ import { Feather } from "@expo/vector-icons";
 import { useApp } from "../context/AppContext";
 import { formatBRL } from "../core/progressEngine";
 import { CheckIn, Mood } from "../core/types";
+import { MOOD_EMOJI } from "../data/clinical";
 import { colors } from "../theme/colors";
 
 // Visualiza Evolução (fluxo 5 do diagrama): gráfico do nível de fissura,
 // histórico de humor e métricas geradas pelo Motor de Cálculo de Progresso.
 
-const MOOD_EMOJI: Record<Mood, string> = {
-  anxious: "😰",
-  confident: "😎",
-  stressed: "😫",
-};
 
 const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 
 /** Dados de exemplo exibidos até o usuário acumular check-ins reais. */
 function demoCheckIns(): CheckIn[] {
-  const moods: Mood[] = ["anxious", "stressed", "anxious", "confident", "confident", "anxious", "confident"];
+  const moods: Mood[] = ["anxious", "hard", "anxious", "good", "good", "anxious", "good"];
   const cravings = [5, 4, 4, 3, 2, 3, 1];
   return cravings.map((craving, i) => {
     const date = new Date();

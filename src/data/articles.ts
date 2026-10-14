@@ -145,4 +145,122 @@ export const ARTICLES: Article[] = [
       },
     ],
   },
+  {
+    id: "cerebro",
+    title: "O que acontece com seu cérebro ao parar de fumar",
+    category: "Ciência",
+    summary: "Como os receptores de nicotina se reequilibram nas primeiras semanas.",
+    readMinutes: 4,
+    icon: "cpu",
+    colorFrom: "#6366F1",
+    colorTo: "#818CF8",
+    sections: [
+      {
+        body:
+          "A nicotina ativa os receptores de dopamina no cérebro, criando uma sensação passageira de " +
+          "prazer. Com o tempo, esses receptores se multiplicam e passam a exigir doses cada vez maiores " +
+          "para o mesmo efeito.",
+      },
+      {
+        body:
+          "Ao parar de fumar, o cérebro leva de 2 a 12 semanas para reequilibrar esses receptores. É por " +
+          "isso que a fissura, a irritabilidade e a dificuldade de concentração ficam mais intensas nas " +
+          "primeiras semanas — e depois vão embora.",
+      },
+      {
+        body:
+          "Depois de 3 meses, a densidade dos receptores volta próxima à de quem nunca fumou. É a prova " +
+          "biológica de que o corpo está te recuperando.",
+      },
+    ],
+  },
+  {
+    id: "respiracao-478",
+    title: "Respiração 4-7-8: como usar na fissura",
+    category: "Prática",
+    summary: "Uma técnica simples para atravessar o pico da vontade de fumar.",
+    readMinutes: 3,
+    icon: "wind",
+    colorFrom: "#0EA5E9",
+    colorTo: "#38BDF8",
+    sections: [
+      {
+        body:
+          "A fissura por nicotina dura em média 3 a 5 minutos, mesmo sem fumar. A respiração 4-7-8 do " +
+          "Dr. Andrew Weil ajuda o corpo a atravessar esse pico ativando o sistema parassimpático.",
+      },
+      {
+        heading: "Como fazer",
+        body:
+          "Inspire pelo nariz por 4 segundos, segure por 7 segundos, expire pela boca por 8 segundos. " +
+          "Repita 4 vezes.",
+      },
+      {
+        body:
+          "Use sempre que sentir uma fissura forte. Com 2 semanas de prática, o corpo aprende a se " +
+          "acalmar em segundos.",
+      },
+    ],
+  },
+  {
+    id: "dinheiro",
+    title: "Quanto um fumante gasta em 10 anos",
+    category: "Motivação",
+    summary: "O custo do cigarro vai muito além do preço do maço.",
+    readMinutes: 2,
+    icon: "dollar-sign",
+    colorFrom: "#F59E0B",
+    colorTo: "#FBBF24",
+    sections: [
+      {
+        body:
+          "Um maço por dia a R$ 12 significa cerca de R$ 4.380 por ano. Em 10 anos, são R$ 43.800 — " +
+          "dinheiro suficiente para trocar de carro, dar entrada num imóvel ou fazer 4 viagens " +
+          "internacionais.",
+      },
+      {
+        body:
+          "E esse cálculo ignora o aumento anual de preço e os custos indiretos: consultas médicas, " +
+          "dentária, perda de produtividade, seguro de vida mais caro.",
+      },
+      {
+        body:
+          "O card 'Dinheiro Economizado' na tela inicial mostra o seu número real. Olhe pra ele quando a " +
+          "vontade bater.",
+      },
+    ],
+  },
+  {
+    id: "sus",
+    title: "Como o SUS trata o tabagismo de graça",
+    category: "Oficial",
+    summary: "Grupos de apoio e medicamentos gratuitos na UBS mais próxima.",
+    readMinutes: 5,
+    icon: "plus-square",
+    colorFrom: "#10B981",
+    colorTo: "#34D399",
+    sections: [
+      {
+        body:
+          "O Programa Nacional de Controle do Tabagismo (PNCT) do Ministério da Saúde oferece " +
+          "tratamento gratuito em UBSs de todo o Brasil.",
+      },
+      {
+        body:
+          "O tratamento combina duas frentes: abordagem cognitivo-comportamental em grupo (4 sessões " +
+          "semanais + reforços mensais por 12 meses) e apoio medicamentoso quando indicado.",
+      },
+      {
+        body:
+          "Os medicamentos disponíveis são adesivo de nicotina (21, 14 e 7 mg), goma de mascar de " +
+          "nicotina (2 mg), pastilha de nicotina (2 mg) e bupropiona (150 mg). A escolha depende do grau " +
+          "de dependência medido pelo Teste de Fagerström.",
+      },
+      {
+        body:
+          "Procure a UBS mais próxima e pergunte pelo grupo de cessação do tabagismo. Nenhum documento " +
+          "além do CPF é necessário.",
+      },
+    ],
+  },
 ];

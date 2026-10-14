@@ -14,10 +14,11 @@ import { colors } from "../theme/colors";
 
 type InfoScreenProps = {
   onOpenUbsLocator: () => void;
+  onOpenFagerstrom: () => void;
   onOpenArticle: (article: Article) => void;
 };
 
-export function InfoScreen({ onOpenUbsLocator, onOpenArticle }: InfoScreenProps) {
+export function InfoScreen({ onOpenUbsLocator, onOpenFagerstrom, onOpenArticle }: InfoScreenProps) {
   const [query, setQuery] = useState("");
 
   const results = useMemo(() => {
@@ -69,10 +70,31 @@ export function InfoScreen({ onOpenUbsLocator, onOpenArticle }: InfoScreenProps)
               Encontre a Unidade Básica de Saúde (UBS) mais próxima com grupo de apoio.
             </Text>
             <Pressable style={styles.mapButton} onPress={onOpenUbsLocator}>
-              <Text style={styles.mapButtonText}>Localizar UBS</Text>
+              <Text style={styles.mapButtonText}>Localizar UBS / CAPS</Text>
             </Pressable>
           </View>
         </View>
+      )}
+
+      {/* Teste de Fagerström (opcional) */}
+      {query.trim().length === 0 && (
+        <Pressable style={[styles.mapCard, styles.testCard]} onPress={onOpenFagerstrom}>
+          <View style={styles.mapBgIcon}>
+            <Feather name="activity" size={100} color={colors.teal800} />
+          </View>
+          <View style={styles.mapContent}>
+            <View style={styles.mapTitleRow}>
+              <Feather name="activity" size={20} color={colors.teal800} />
+              <Text style={[styles.mapTitle, { color: colors.teal800 }]}>Teste de Fagerström</Text>
+            </View>
+            <Text style={[styles.mapDesc, { color: colors.teal600 }]}>
+              Teste opcional: calcule seu grau de dependência à nicotina em poucos minutos.
+            </Text>
+            <View style={[styles.mapButton, { backgroundColor: colors.teal600 }]}>
+              <Text style={styles.mapButtonText}>Fazer o teste</Text>
+            </View>
+          </View>
+        </Pressable>
       )}
 
       {/* Artigos */}
@@ -159,6 +181,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.blue100,
     overflow: "hidden",
+  },
+  testCard: {
+    backgroundColor: colors.teal50,
+    borderColor: colors.teal100,
   },
   mapBgIcon: {
     position: "absolute",

@@ -1,33 +1,100 @@
-import React, { useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { BottomNav, TabKey } from "./src/components/BottomNav";
 import { PanicModal } from "./src/components/PanicModal";
+import { TourOverlay } from "./src/components/TourOverlay";
 import { AppProvider, useApp } from "./src/context/AppContext";
 import { Article } from "./src/data/articles";
 import { AchievementsScreen } from "./src/screens/AchievementsScreen";
 import { ArticleScreen } from "./src/screens/ArticleScreen";
 import { ChatScreen } from "./src/screens/ChatScreen";
 import { CheckInScreen } from "./src/screens/CheckInScreen";
+import { EditProfileScreen } from "./src/screens/EditProfileScreen";
 import { EvolutionScreen } from "./src/screens/EvolutionScreen";
+import { FagerstromTestScreen } from "./src/screens/FagerstromTestScreen";
+import { ForgotPasswordScreen } from "./src/screens/ForgotPasswordScreen";
 import { HomeScreen } from "./src/screens/HomeScreen";
 import { InfoScreen } from "./src/screens/InfoScreen";
+import { LoginScreen } from "./src/screens/LoginScreen";
 import { OnboardingScreen } from "./src/screens/OnboardingScreen";
-import { ProfileScreen } from "./src/screens/ProfileScreen";
+import { ProfileRoute, ProfileScreen } from "./src/screens/ProfileScreen";
+import { RelapseScreen } from "./src/screens/RelapseScreen";
+import { ReminderSettingsScreen } from "./src/screens/ReminderSettingsScreen";
+import { ReportScreen } from "./src/screens/ReportScreen";
 import { TermsScreen } from "./src/screens/TermsScreen";
+import { TreatmentScreen } from "./src/screens/TreatmentScreen";
+import { TriggersScreen } from "./src/screens/TriggersScreen";
 import { UbsLocatorScreen } from "./src/screens/UbsLocatorScreen";
 import { colors } from "./src/theme/colors";
 
 // Telas que cobrem as abas (empilhadas por cima da navegação principal).
-type Overlay = "checkin" | "achievements" | "ubs" | "evolution" | "terms" | "article" | null;
+type Overlay =
+  | "checkin"
+  | "relapse"
+  | "achievements"
+  | "ubs"
+  | "evolution"
+  | "article"
+  | "fagerstrom"
+  | ProfileRoute
+  | null;
+
+// Telas de acesso antes de existir um perfil.
+type AuthView = "onboarding" | "login" | "forgot";
+
+function AuthFlow() {
+  const { completeOnboarding } = useApp();
+  const [view, setView] = useState<AuthView>("onboarding");
+
+  if (view === "login") {
+    return (
+      <LoginScreen
+        onClose={() => setView("onboarding")}
+        onForgot={() => setView("forgot")}
+        onSuccess={(email, provider) => {
+          // Protótipo sem backend: restaura uma conta de demonstração.
+          const quit = new Date();
+          quit.setDate(quit.getDate() - 14);
+          quit.setHours(quit.getHours() - 8);
+          completeOnboarding({
+            name: "Mariana Silva",
+            email: email || (provider === "apple" ? "mariana.silva@icloud.com" : "mariana.silva@gmail.com"),
+            authMethod: provider,
+            quitDate: quit.toISOString(),
+            cigsPerDay: 15,
+            packPrice: 12.5,
+            cigsPerPack: 20,
+            usageType: "cigarro",
+            stopMethod: "abrupto",
+            tourDone: true,
+          });
+        }}
+      />
+    );
+  }
+  if (view === "forgot") return <ForgotPasswordScreen onClose={() => setView("login")} />;
+  return <OnboardingScreen onLogin={() => setView("login")} />;
+}
 
 function Root() {
-  const { loading, profile } = useApp();
+  const { loading, profile, updateProfile } = useApp();
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [showPanicModal, setShowPanicModal] = useState(false);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [activeArticle, setActiveArticle] = useState<Article | null>(null);
+  const showTour = profile ? profile.tourDone === false : false;
+  const onTourStep = useCallback((tab: TabKey) => setActiveTab(tab), []);
+
+  // Ao sair da conta, a próxima sessão começa sempre pela Home.
+  const hasProfile = profile !== null;
+  useEffect(() => {
+    if (!hasProfile) {
+      setActiveTab("home");
+      setOverlay(null);
+    }
+  }, [hasProfile]);
 
   if (loading) {
     return (
@@ -37,9 +104,9 @@ function Root() {
     );
   }
 
-  // Fluxo 1 do diagrama: sem perfil, o usuário passa pelo onboarding.
+  // Fluxo 1 do diagrama: sem perfil, o usuário passa pelo onboarding (ou login).
   if (!profile) {
-    return <OnboardingScreen />;
+    return <AuthFlow />;
   }
 
   const closeOverlay = () => setOverlay(null);
@@ -47,7 +114,9 @@ function Root() {
   const renderOverlay = () => {
     switch (overlay) {
       case "checkin":
-        return <CheckInScreen onClose={closeOverlay} />;
+        return <CheckInScreen onClose={closeOverlay} onRelapse={() => setOverlay("relapse")} />;
+      case "relapse":
+        return <RelapseScreen onDone={closeOverlay} />;
       case "achievements":
         return <AchievementsScreen onClose={closeOverlay} />;
       case "ubs":
@@ -56,9 +125,28 @@ function Root() {
         return <EvolutionScreen onClose={closeOverlay} />;
       case "terms":
         return <TermsScreen onClose={closeOverlay} />;
+      case "fagerstrom":
+        return <FagerstromTestScreen onClose={closeOverlay} />;
+      case "treatment":
+        return <TreatmentScreen onClose={closeOverlay} />;
+      case "report":
+        return <ReportScreen onClose={closeOverlay} onEditTreatment={() => setOverlay("treatment")} />;
+      case "triggers":
+        return <TriggersScreen onClose={closeOverlay} />;
+      case "edit-profile":
+        return <EditProfileScreen onClose={closeOverlay} />;
+      case "reminder":
+        return <ReminderSettingsScreen onClose={closeOverlay} />;
       case "article":
         return activeArticle ? (
-          <ArticleScreen article={activeArticle} onClose={closeOverlay} />
+          <ArticleScreen
+            article={activeArticle}
+            onClose={closeOverlay}
+            onChat={() => {
+              closeOverlay();
+              setActiveTab("chat");
+            }}
+          />
         ) : null;
       default:
         return null;
@@ -73,6 +161,7 @@ function Root() {
         return (
           <InfoScreen
             onOpenUbsLocator={() => setOverlay("ubs")}
+            onOpenFagerstrom={() => setOverlay("fagerstrom")}
             onOpenArticle={(article) => {
               setActiveArticle(article);
               setOverlay("article");
@@ -80,12 +169,7 @@ function Root() {
           />
         );
       case "profile":
-        return (
-          <ProfileScreen
-            onOpenEvolution={() => setOverlay("evolution")}
-            onOpenTerms={() => setOverlay("terms")}
-          />
-        );
+        return <ProfileScreen onNavigate={setOverlay} />;
       case "home":
       default:
         return (
@@ -102,11 +186,22 @@ function Root() {
     <>
       <View style={styles.screen}>{overlay ? renderOverlay() : renderTab()}</View>
 
+      {showTour && !overlay && (
+        <TourOverlay
+          onStepChange={onTourStep}
+          onFinish={() => {
+            setActiveTab("home");
+            updateProfile({ tourDone: true });
+          }}
+        />
+      )}
+
       {!overlay && (
         <BottomNav
           activeTab={activeTab}
           onChangeTab={setActiveTab}
-          onPanicPress={() => setShowPanicModal(true)}
+          onPanicPress={() => !showTour && setShowPanicModal(true)}
+          tourTab={showTour ? activeTab : null}
         />
       )}
 
@@ -119,19 +214,31 @@ export default function App() {
   return (
     <AppProvider>
       <SafeAreaProvider>
-        <SafeAreaView style={styles.container} edges={["top"]}>
-          <StatusBar style="dark" />
-          <Root />
-        </SafeAreaView>
+        <View style={styles.page}>
+          <SafeAreaView style={styles.container} edges={["top"]}>
+            <StatusBar style="dark" />
+            <Root />
+          </SafeAreaView>
+        </View>
       </SafeAreaProvider>
     </AppProvider>
   );
 }
 
 const styles = StyleSheet.create({
+  // No navegador, o app fica numa coluna com largura de celular (como no
+  // protótipo do Figma); no Android/iOS ocupa a tela inteira.
+  page: {
+    flex: 1,
+    backgroundColor: Platform.OS === "web" ? "#F3F4F6" : colors.slate50,
+  },
   container: {
     flex: 1,
+    width: "100%",
+    maxWidth: 480,
+    alignSelf: "center",
     backgroundColor: colors.slate50,
+    overflow: "hidden",
   },
   screen: {
     flex: 1,

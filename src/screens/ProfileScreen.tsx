@@ -1,25 +1,17 @@
-import React, { useState } from "react";
-import {
-  Image,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import React from "react";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { Toggle } from "../components/ui";
 import { useApp } from "../context/AppContext";
-import {
-  cancelDailyReminder,
-  remindersSupported,
-  requestPermission,
-  scheduleDailyReminder,
-} from "../core/notifications";
+import { cancelDailyReminder, requestPermission, scheduleReminders } from "../core/notifications";
+import { pad2 } from "../core/progressEngine";
+import { avatarUri } from "../data/clinical";
 import { colors } from "../theme/colors";
 
 // Módulo de Perfil (diagrama: Camada de Apresentação). O logout aciona o
 // direito ao esquecimento: limpa os dados locais e volta ao onboarding.
+
+export type ProfileRoute = "edit-profile" | "triggers" | "treatment" | "report" | "terms" | "reminder";
 
 type MenuItemProps = {
   icon: keyof typeof Feather.glyphMap;
@@ -41,107 +33,95 @@ function MenuItem({ icon, iconColor, label, onPress, last }: MenuItemProps) {
   );
 }
 
-type ProfileScreenProps = {
-  onOpenEvolution: () => void;
-  onOpenTerms: () => void;
-};
+export function ProfileScreen({ onNavigate }: { onNavigate: (route: ProfileRoute) => void }) {
+  const { profile, cycles, updateProfile, logout } = useApp();
+  const reminderOn = profile?.reminderEnabled ?? false;
+  const hour = profile?.reminderHour ?? 20;
+  const minute = profile?.reminderMinute ?? 0;
+  const days = profile?.reminderDays ?? [1, 2, 3, 4, 5];
 
-export function ProfileScreen({ onOpenEvolution, onOpenTerms }: ProfileScreenProps) {
-  const { profile, updateProfile, logout } = useApp();
-  const [showGoalModal, setShowGoalModal] = useState(false);
-  const [cigsPerDay, setCigsPerDay] = useState(profile?.cigsPerDay ?? 20);
-  const [reminderOn, setReminderOn] = useState(profile?.reminderEnabled ?? false);
-  const reminderHour = profile?.reminderHour ?? 20;
-
-  const saveGoal = () => {
-    updateProfile({ cigsPerDay });
-    setShowGoalModal(false);
-  };
-
-  const toggleReminder = async () => {
-    const next = !reminderOn;
-    setReminderOn(next);
-    updateProfile({ reminderEnabled: next, reminderHour });
+  const toggleReminder = async (next: boolean) => {
+    await updateProfile({ reminderEnabled: next });
     if (next) {
       await requestPermission();
-      await scheduleDailyReminder(reminderHour);
+      await scheduleReminders(hour, minute, days);
     } else {
       await cancelDailyReminder();
     }
   };
 
+  const daysLabel =
+    days.length === 7 ? "Diariamente" : days.length === 5 && !days.includes(0) && !days.includes(6) ? "Dias úteis" : `${days.length} dias/semana`;
+
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {/* Cabeçalho do perfil */}
       <View style={styles.header}>
-        <View>
+        <Pressable onPress={() => onNavigate("edit-profile")}>
           <View style={styles.avatarWrap}>
-            <Image source={{ uri: "https://i.pravatar.cc/150?img=47" }} style={styles.avatar} />
+            <Image source={{ uri: avatarUri(profile?.avatar) }} style={styles.avatar} />
           </View>
-          <Pressable style={styles.editBadge}>
+          <View style={styles.editBadge}>
             <Feather name="edit-2" size={13} color={colors.white} />
-          </Pressable>
-        </View>
+          </View>
+        </Pressable>
         <View style={styles.headerText}>
           <Text style={styles.name}>{profile?.name ?? "Visitante"}</Text>
           <Text style={styles.email}>{profile?.email ?? ""}</Text>
         </View>
       </View>
 
-      {/* Lembrete diário */}
+      {/* Lembrete de check-in */}
       <View style={styles.reminderCard}>
-        <View style={styles.reminderIconWrap}>
-          <Feather name="bell" size={20} color={colors.orange500} />
-        </View>
-        <View style={styles.reminderBody}>
-          <Text style={styles.reminderTitle}>Lembrete de Check-in</Text>
-          <Text style={styles.reminderSubtitle}>
-            {reminderOn
-              ? `Todos os dias às ${String(reminderHour).padStart(2, "0")}h`
-              : "Receba um lembrete gentil todo dia"}
-          </Text>
-          {!remindersSupported() && reminderOn && (
-            <Text style={styles.reminderHint}>
-              Disponível no app instalado (Android/iOS).
+        <Pressable style={styles.reminderMain} onPress={() => onNavigate("reminder")}>
+          <View style={styles.reminderIconWrap}>
+            <Feather name="bell" size={20} color={colors.orange500} />
+          </View>
+          <View style={styles.reminderBody}>
+            <Text style={styles.reminderTitle}>Lembrete de Check-in</Text>
+            <Text style={styles.reminderSubtitle}>
+              {reminderOn ? `${daysLabel} às ${pad2(hour)}:${pad2(minute)}` : "Toque para configurar"}
             </Text>
-          )}
-        </View>
-        <Pressable
-          onPress={toggleReminder}
-          style={[styles.toggle, reminderOn && styles.toggleOn]}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: reminderOn }}
-        >
-          <View style={[styles.toggleKnob, reminderOn && styles.toggleKnobOn]} />
+          </View>
         </Pressable>
+        <Toggle value={reminderOn} onChange={toggleReminder} />
       </View>
+
+      {/* Histórico de ciclos — aparece após o primeiro reinício */}
+      {cycles.length > 0 && (
+        <View style={styles.menuCard}>
+          <View style={styles.cyclesHeader}>
+            <View style={styles.cyclesIcon}>
+              <Feather name="rotate-ccw" size={18} color={colors.orange500} />
+            </View>
+            <View>
+              <Text style={styles.cyclesTitle}>Histórico de Ciclos</Text>
+              <Text style={styles.cyclesSubtitle}>Cada ciclo é uma prova de coragem</Text>
+            </View>
+          </View>
+          {cycles.map((c, i) => (
+            <View key={c.endedAt} style={styles.cycleRow}>
+              <View style={styles.cycleLeft}>
+                <View style={styles.cycleNumber}>
+                  <Text style={styles.cycleNumberText}>{i + 1}</Text>
+                </View>
+                <Text style={styles.cycleLabel}>{c.label}</Text>
+              </View>
+              <Text style={styles.cycleDays}>
+                {c.days} {c.days === 1 ? "dia" : "dias"}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       {/* Menu */}
       <View style={styles.menuCard}>
-        <MenuItem
-          icon="target"
-          iconColor={colors.blue500}
-          label="Editar Meta Diária"
-          onPress={() => setShowGoalModal(true)}
-        />
-        <MenuItem
-          icon="bar-chart-2"
-          iconColor={colors.orange500}
-          label="Minha Evolução"
-          onPress={onOpenEvolution}
-        />
-        <MenuItem
-          icon="file-text"
-          iconColor={colors.teal500}
-          label="Exportar Relatório (PDF)"
-        />
-        <MenuItem
-          icon="shield"
-          iconColor={colors.slate500}
-          label="Termos de Uso e LGPD"
-          onPress={onOpenTerms}
-          last
-        />
+        <MenuItem icon="user" iconColor={colors.slate500} label="Editar Perfil" onPress={() => onNavigate("edit-profile")} />
+        <MenuItem icon="zap" iconColor={colors.orange500} label="Diário de Gatilhos" onPress={() => onNavigate("triggers")} />
+        <MenuItem icon="heart" iconColor={colors.rose500} label="Meu Tratamento" onPress={() => onNavigate("treatment")} />
+        <MenuItem icon="file-text" iconColor={colors.teal500} label="Exportar Relatório (PDF)" onPress={() => onNavigate("report")} />
+        <MenuItem icon="shield" iconColor={colors.slate500} label="Termos de Uso e LGPD" onPress={() => onNavigate("terms")} last />
       </View>
 
       <View style={styles.menuCard}>
@@ -152,161 +132,56 @@ export function ProfileScreen({ onOpenEvolution, onOpenTerms }: ProfileScreenPro
           <Text style={styles.logoutLabel}>Sair da Conta</Text>
         </Pressable>
       </View>
-
-      {/* Modal: Editar Meta Diária */}
-      <Modal visible={showGoalModal} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Meta Diária</Text>
-            <Text style={styles.modalSubtitle}>
-              Quantos cigarros você fumava por dia? Usamos esse valor para
-              calcular sua economia e seus marcos.
-            </Text>
-
-            <View style={styles.goalStepper}>
-              <Pressable
-                style={styles.goalButton}
-                onPress={() => setCigsPerDay(Math.max(1, cigsPerDay - 1))}
-              >
-                <Feather name="minus" size={22} color={colors.teal600} />
-              </Pressable>
-              <View style={styles.goalValueWrap}>
-                <Text style={styles.goalValue}>{cigsPerDay}</Text>
-                <Text style={styles.goalUnit}>cigarros/dia</Text>
-              </View>
-              <Pressable
-                style={styles.goalButton}
-                onPress={() => setCigsPerDay(Math.min(99, cigsPerDay + 1))}
-              >
-                <Feather name="plus" size={22} color={colors.teal600} />
-              </Pressable>
-            </View>
-
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancel} onPress={() => setShowGoalModal(false)}>
-                <Text style={styles.modalCancelText}>Cancelar</Text>
-              </Pressable>
-              <Pressable style={styles.modalSave} onPress={saveGoal}>
-                <Text style={styles.modalSaveText}>Salvar</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    padding: 24,
-    paddingBottom: 120,
-    gap: 32,
-  },
-  header: {
-    paddingTop: 32,
-    alignItems: "center",
-    gap: 12,
-  },
+  content: { padding: 24, paddingBottom: 120, gap: 20 },
+  header: { alignItems: "center", paddingTop: 24, gap: 12 },
   avatarWrap: {
     width: 96,
     height: 96,
     borderRadius: 999,
-    backgroundColor: colors.white,
     borderWidth: 4,
     borderColor: colors.white,
     overflow: "hidden",
+    backgroundColor: colors.white,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  avatar: {
-    width: "100%",
-    height: "100%",
-  },
+  avatar: { width: "100%", height: "100%" },
   editBadge: {
     position: "absolute",
     bottom: 0,
     right: 0,
-    backgroundColor: colors.blue500,
-    padding: 8,
+    backgroundColor: colors.teal500,
+    padding: 7,
     borderRadius: 999,
     borderWidth: 2,
     borderColor: colors.white,
   },
-  headerText: {
-    alignItems: "center",
-  },
-  name: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: colors.slate800,
-  },
-  email: {
-    fontSize: 14,
-    color: colors.slate500,
-  },
+  headerText: { alignItems: "center" },
+  name: { fontSize: 20, fontWeight: "700", color: colors.slate800 },
+  email: { fontSize: 14, color: colors.slate500 },
   reminderCard: {
     backgroundColor: colors.white,
-    borderRadius: 24,
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: colors.slate100,
-    padding: 16,
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: 12,
   },
-  reminderIconWrap: {
-    backgroundColor: colors.orange100,
-    padding: 10,
-    borderRadius: 14,
-  },
-  reminderBody: {
-    flex: 1,
-    gap: 2,
-  },
-  reminderTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.slate800,
-  },
-  reminderSubtitle: {
-    fontSize: 12,
-    color: colors.slate500,
-  },
-  reminderHint: {
-    fontSize: 11,
-    color: colors.orange500,
-    marginTop: 2,
-  },
-  toggle: {
-    width: 52,
-    height: 30,
-    borderRadius: 999,
-    backgroundColor: colors.slate200,
-    padding: 3,
-    justifyContent: "center",
-  },
-  toggleOn: {
-    backgroundColor: colors.teal500,
-  },
-  toggleKnob: {
-    width: 24,
-    height: 24,
-    borderRadius: 999,
-    backgroundColor: colors.white,
-    alignSelf: "flex-start",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  toggleKnobOn: {
-    alignSelf: "flex-end",
-  },
+  reminderMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
+  reminderIconWrap: { backgroundColor: colors.orange50, padding: 8, borderRadius: 12 },
+  reminderBody: { flex: 1 },
+  reminderTitle: { fontSize: 14, fontWeight: "600", color: colors.slate800 },
+  reminderSubtitle: { fontSize: 12, color: colors.slate500 },
   menuCard: {
     backgroundColor: colors.white,
     borderRadius: 24,
@@ -314,124 +189,45 @@ const styles = StyleSheet.create({
     borderColor: colors.slate100,
     overflow: "hidden",
   },
-  menuItem: {
+  menuItem: { flexDirection: "row", alignItems: "center", gap: 16, padding: 16 },
+  menuItemBorder: { borderBottomWidth: 1, borderBottomColor: colors.slate50 },
+  menuIconWrap: { backgroundColor: colors.slate50, padding: 8, borderRadius: 12 },
+  menuLabel: { flex: 1, fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  cyclesHeader: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16, paddingBottom: 8 },
+  cyclesIcon: { backgroundColor: colors.orange50, padding: 8, borderRadius: 12 },
+  cyclesTitle: { fontSize: 14, fontWeight: "600", color: colors.slate800 },
+  cyclesSubtitle: { fontSize: 12, color: colors.slate400 },
+  cycleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
-    padding: 16,
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.slate50,
   },
-  menuItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.slate50,
-  },
-  menuIconWrap: {
-    backgroundColor: colors.slate50,
-    padding: 8,
-    borderRadius: 12,
-  },
-  menuLabel: {
-    flex: 1,
-    fontWeight: "600",
-    fontSize: 14,
-    color: colors.slate700,
-  },
-  logoutItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-    padding: 16,
-  },
-  logoutIconWrap: {
-    backgroundColor: colors.rose50,
-    padding: 8,
-    borderRadius: 12,
-  },
-  logoutLabel: {
-    flex: 1,
-    fontWeight: "600",
-    fontSize: 14,
-    color: colors.rose500,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.5)",
+  cycleLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  cycleNumber: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: colors.orange100,
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
   },
-  modalCard: {
-    width: "100%",
-    backgroundColor: colors.white,
-    borderRadius: 24,
-    padding: 24,
-    gap: 16,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.slate800,
-    textAlign: "center",
-  },
-  modalSubtitle: {
+  cycleNumberText: { fontSize: 12, fontWeight: "700", color: colors.orange600 },
+  cycleLabel: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  cycleDays: {
     fontSize: 13,
+    fontWeight: "700",
     color: colors.slate500,
-    textAlign: "center",
-    lineHeight: 19,
-  },
-  goalStepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 24,
-    paddingVertical: 8,
-  },
-  goalButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: colors.teal50,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  goalValueWrap: {
-    alignItems: "center",
-    minWidth: 90,
-  },
-  goalValue: {
-    fontSize: 36,
-    fontWeight: "700",
-    color: colors.slate800,
-  },
-  goalUnit: {
-    fontSize: 12,
-    color: colors.slate400,
-  },
-  modalActions: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  modalCancel: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
     backgroundColor: colors.slate50,
-    borderWidth: 1,
-    borderColor: colors.slate200,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: "hidden",
   },
-  modalCancelText: {
-    fontWeight: "600",
-    color: colors.slate600,
-  },
-  modalSave: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 16,
-    alignItems: "center",
-    backgroundColor: colors.teal500,
-  },
-  modalSaveText: {
-    fontWeight: "700",
-    color: colors.white,
-  },
+  logoutItem: { flexDirection: "row", alignItems: "center", gap: 16, padding: 16 },
+  logoutIconWrap: { backgroundColor: colors.rose50, padding: 8, borderRadius: 12 },
+  logoutLabel: { fontSize: 14, fontWeight: "600", color: colors.rose500 },
 });

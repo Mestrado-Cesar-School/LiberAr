@@ -11,57 +11,81 @@ import React, {
   useState,
 } from "react";
 import { computeProgress, dayKey } from "../core/progressEngine";
-import { CheckIn, Progress, UserProfile } from "../core/types";
+import {
+  CheckIn,
+  Cycle,
+  FagerstromResult,
+  Progress,
+  Treatment,
+  TriggerEntry,
+  UserProfile,
+} from "../core/types";
+import { EMPTY_TREATMENT } from "../data/clinical";
 import * as storage from "../data/storage";
 
 type AppState = {
   loading: boolean;
   profile: UserProfile | null;
   checkIns: CheckIn[];
+  cycles: Cycle[];
+  fagerstrom: FagerstromResult | null;
+  treatment: Treatment;
+  triggers: TriggerEntry[];
   progress: Progress | null;
   /** Check-in registrado hoje, se houver (usado para editar em vez de duplicar). */
   todaysCheckIn: CheckIn | null;
   completeOnboarding: (profile: UserProfile) => Promise<void>;
   updateProfile: (patch: Partial<UserProfile>) => Promise<void>;
   addCheckIn: (checkIn: CheckIn) => Promise<void>;
+  /**
+   * Recaída — "Reiniciar minha contagem": encerra a sequência atual como um
+   * ciclo no histórico e recomeça o cronômetro agora.
+   */
+  restartStreak: () => Promise<void>;
+  saveFagerstrom: (result: FagerstromResult) => Promise<void>;
+  saveTreatment: (treatment: Treatment) => Promise<void>;
+  addTrigger: (entry: TriggerEntry) => Promise<void>;
   logout: () => Promise<void>;
 };
 
 const AppContext = createContext<AppState | null>(null);
 
-/** Data do lapso mais recente (check-in com recaída), ou undefined. */
-function mostRecentLapse(checkIns: CheckIn[]): string | undefined {
-  const smoked = checkIns
-    .filter((c) => c.smoked)
-    .map((c) => c.date)
-    .sort();
-  return smoked.length ? smoked[smoked.length - 1] : undefined;
-}
-
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
+  const [cycles, setCycles] = useState<Cycle[]>([]);
+  const [fagerstrom, setFagerstrom] = useState<FagerstromResult | null>(null);
+  const [treatment, setTreatment] = useState<Treatment>(EMPTY_TREATMENT);
+  const [triggers, setTriggers] = useState<TriggerEntry[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     (async () => {
       try {
-        const [storedProfile, storedCheckIns] = await Promise.all([
+        const [p, c, cy, f, t, tr] = await Promise.all([
           storage.loadProfile(),
           storage.loadCheckIns(),
+          storage.loadCycles(),
+          storage.loadFagerstrom(),
+          storage.loadTreatment(),
+          storage.loadTriggers(),
         ]);
-        setProfile(storedProfile);
-        setCheckIns(storedCheckIns);
+        setProfile(p);
+        setCheckIns(c);
+        setCycles(cy);
+        setFagerstrom(f);
+        setTreatment(t ?? EMPTY_TREATMENT);
+        setTriggers(tr);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  // Reavalia o cronômetro a cada minuto para o dashboard ficar vivo.
+  // Reavalia o cronômetro a cada 30s para o dashboard ficar vivo.
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    const id = setInterval(() => setTick((t) => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -100,26 +124,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       setCheckIns(next);
       await storage.saveCheckIns(next);
-
-      // Regra de recaída (TCC): a sequência do cronômetro recomeça no lapso
-      // mais recente. Recalcular a cada check-in mantém a regra consistente
-      // mesmo quando o usuário corrige o registro do dia.
-      if (profile) {
-        const lapse = mostRecentLapse(next);
-        if (lapse !== profile.lastLapseDate) {
-          const updated = { ...profile, lastLapseDate: lapse };
-          setProfile(updated);
-          await storage.saveProfile(updated);
-        }
-      }
     },
-    [checkIns, profile]
+    [checkIns]
+  );
+
+  const restartStreak = useCallback(async () => {
+    if (!profile || !progress) return;
+    const cycle: Cycle = {
+      label: `Ciclo ${cycles.length + 1}`,
+      days: progress.days,
+      endedAt: new Date().toISOString(),
+    };
+    const nextCycles = [...cycles, cycle];
+    const nextProfile = { ...profile, lastLapseDate: cycle.endedAt };
+    setCycles(nextCycles);
+    setProfile(nextProfile);
+    await Promise.all([storage.saveCycles(nextCycles), storage.saveProfile(nextProfile)]);
+  }, [profile, progress, cycles]);
+
+  const saveFagerstromResult = useCallback(async (result: FagerstromResult) => {
+    setFagerstrom(result);
+    await storage.saveFagerstrom(result);
+  }, []);
+
+  const saveTreatmentData = useCallback(async (t: Treatment) => {
+    setTreatment(t);
+    await storage.saveTreatment(t);
+  }, []);
+
+  const addTrigger = useCallback(
+    async (entry: TriggerEntry) => {
+      const next = [entry, ...triggers];
+      setTriggers(next);
+      await storage.saveTriggers(next);
+    },
+    [triggers]
   );
 
   const logout = useCallback(async () => {
     await storage.clearAll();
     setProfile(null);
     setCheckIns([]);
+    setCycles([]);
+    setFagerstrom(null);
+    setTreatment(EMPTY_TREATMENT);
+    setTriggers([]);
   }, []);
 
   const value = useMemo(
@@ -127,22 +176,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       loading,
       profile,
       checkIns,
+      cycles,
+      fagerstrom,
+      treatment,
+      triggers,
       progress,
       todaysCheckIn,
       completeOnboarding,
       updateProfile,
       addCheckIn,
+      restartStreak,
+      saveFagerstrom: saveFagerstromResult,
+      saveTreatment: saveTreatmentData,
+      addTrigger,
       logout,
     }),
     [
       loading,
       profile,
       checkIns,
+      cycles,
+      fagerstrom,
+      treatment,
+      triggers,
       progress,
       todaysCheckIn,
       completeOnboarding,
       updateProfile,
       addCheckIn,
+      restartStreak,
+      saveFagerstromResult,
+      saveTreatmentData,
+      addTrigger,
       logout,
     ]
   );

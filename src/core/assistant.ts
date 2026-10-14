@@ -61,6 +61,30 @@ const RULES: Rule[] = [
       "Vamos lá! Exercício da respiração quadrada: inspire contando até 4, segure 4, expire 4 e pause 4. " +
       "Repita 5 ciclos. Ela ativa o sistema nervoso parassimpático e reduz a fissura em poucos minutos.",
   },
+  {
+    keywords: ["sono", "insôn", "insonia", "dormir", "dorm"],
+    reply: () =>
+      "Alterações no sono são comuns nas 2 primeiras semanas. Evite cafeína depois das 15h e crie um ritual antes de dormir.",
+  },
+  {
+    keywords: ["peso", "engord", "fome", "apetite"],
+    reply: () =>
+      "Ganho de peso costuma ser leve (2 a 4 kg) e reversível. Hidratação, chás sem açúcar e caminhadas curtas ajudam a compensar.",
+  },
+  {
+    keywords: ["remédi", "remedi", "medic", "adesivo", "bupropi", "goma", "pastilha"],
+    reply: () =>
+      "As dúvidas sobre medicamento devem ir para o profissional da UBS. Você pode registrar tudo em Perfil > Meu Tratamento e levar no relatório.",
+  },
+  {
+    keywords: ["motiv", "desanim", "difícil", "dificil", "cansad"],
+    reply: () =>
+      "Você já ganhou dinheiro e tempo de vida. Abra a Home e olhe a sua contagem — é prova de que já mudou. E lembre-se do seu motivo (Perfil > Editar Perfil).",
+  },
+  {
+    keywords: ["obrigad", "valeu", "brigad"],
+    reply: () => "Estou aqui sempre que precisar. Continue firme.",
+  },
 ];
 
 const DEFAULT_REPLIES = [

@@ -10,11 +10,16 @@ type NavItemProps = {
   label: string;
   active: boolean;
   onPress: () => void;
+  /** Durante o tour: true destaca este item, false o esmaece. */
+  spotlight?: boolean;
 };
 
-function NavItem({ icon, label, active, onPress }: NavItemProps) {
+function NavItem({ icon, label, active, onPress, spotlight }: NavItemProps) {
   return (
-    <Pressable style={styles.navItem} onPress={onPress}>
+    <Pressable
+      style={[styles.navItem, spotlight === false && styles.dimmed, spotlight && styles.spotlight]}
+      onPress={onPress}
+    >
       <View style={[styles.navIconWrap, active && styles.navIconWrapActive]}>
         <Feather name={icon} size={24} color={active ? colors.teal600 : colors.slate400} />
       </View>
@@ -29,23 +34,26 @@ type BottomNavProps = {
   activeTab: TabKey;
   onChangeTab: (tab: TabKey) => void;
   onPanicPress: () => void;
+  /** Aba destacada pelo tour de apresentação (as demais ficam esmaecidas). */
+  tourTab?: TabKey | null;
 };
 
-export function BottomNav({ activeTab, onChangeTab, onPanicPress }: BottomNavProps) {
+export function BottomNav({ activeTab, onChangeTab, onPanicPress, tourTab }: BottomNavProps) {
+  const spot = (tab: TabKey) => (tourTab ? tourTab === tab : undefined);
   return (
     <View style={styles.container}>
-      <NavItem icon="home" label="Home" active={activeTab === "home"} onPress={() => onChangeTab("home")} />
-      <NavItem icon="message-circle" label="Chat" active={activeTab === "chat"} onPress={() => onChangeTab("chat")} />
+      <NavItem icon="home" label="Home" active={activeTab === "home"} onPress={() => onChangeTab("home")} spotlight={spot("home")} />
+      <NavItem icon="message-circle" label="Chat" active={activeTab === "chat"} onPress={() => onChangeTab("chat")} spotlight={spot("chat")} />
 
       {/* FAB — Botão de Emergência */}
-      <View style={styles.fabSlot}>
+      <View style={[styles.fabSlot, tourTab && styles.dimmed]}>
         <Pressable style={styles.fab} onPress={onPanicPress}>
           <Feather name="alert-triangle" size={28} color={colors.white} />
         </Pressable>
       </View>
 
-      <NavItem icon="book-open" label="Explorar" active={activeTab === "info"} onPress={() => onChangeTab("info")} />
-      <NavItem icon="user" label="Perfil" active={activeTab === "profile"} onPress={() => onChangeTab("profile")} />
+      <NavItem icon="book-open" label="Explorar" active={activeTab === "info"} onPress={() => onChangeTab("info")} spotlight={spot("info")} />
+      <NavItem icon="user" label="Perfil" active={activeTab === "profile"} onPress={() => onChangeTab("profile")} spotlight={spot("profile")} />
     </View>
   );
 }
@@ -77,6 +85,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
+  },
+  dimmed: {
+    opacity: 0.25,
+  },
+  spotlight: {
+    borderWidth: 3,
+    borderColor: "#2DD4BF",
+    borderRadius: 999,
+    padding: 6,
+    margin: -9,
   },
   navIconWrap: {
     padding: 6,

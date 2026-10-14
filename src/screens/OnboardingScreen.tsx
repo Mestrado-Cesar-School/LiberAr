@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import {
   KeyboardAvoidingView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -11,521 +13,831 @@ import {
 } from "react-native";
 import { Feather, FontAwesome } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { PrimaryButton, SelectCard } from "../components/ui";
 import { useApp } from "../context/AppContext";
+import { pad2 } from "../core/progressEngine";
+import {
+  AuthMethod,
+  MainFear,
+  SmokeDuration,
+  StopMethod,
+  StopReason,
+  UsageType,
+  VapeHabits,
+} from "../core/types";
+import {
+  MAIN_FEAR_OPTIONS,
+  SMOKE_DURATION_OPTIONS,
+  STOP_REASON_OPTIONS,
+  TERMS_SECTIONS,
+  USAGE_OPTIONS,
+} from "../data/clinical";
 import { colors } from "../theme/colors";
 
 // Módulo de Onboarding & Perfil (fluxo 1 do diagrama):
-// boas-vindas → identificação → hábitos → Dia D.
+// boas-vindas → cadastro → motivação (3 perguntas) → termos/LGPD →
+// o que você usa → hábitos → como pretende parar → Dia D.
 
-type QuitOption = { label: string; daysAgo: number };
+const TOTAL_STEPS = 7; // etapas com indicador de progresso (1..7)
 
-const QUIT_OPTIONS: QuitOption[] = [
-  { label: "Hoje", daysAgo: 0 },
-  { label: "Há 3 dias", daysAgo: 3 },
-  { label: "Há 1 semana", daysAgo: 7 },
-  { label: "Há 2 semanas", daysAgo: 14 },
+const VAPE_FIELDS: { key: keyof VapeHabits; label: string }[] = [
+  { key: "nicotineMg", label: "Concentração nic. (mg/mL)" },
+  { key: "juiceMl", label: "Volume do juice (mL)" },
+  { key: "podDays", label: "Quanto tempo dura seu pod/refil? (dias)" },
+  { key: "juicePrice", label: "Preço do juice (R$)" },
+  { key: "coilPrice", label: "Preço do coil (R$)" },
 ];
 
-function Stepper({
-  value,
-  onChange,
-  min = 1,
-  max = 99,
-  suffix,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  min?: number;
-  max?: number;
-  suffix?: string;
-}) {
+function toNumber(text: string, fallback = 0): number {
+  const n = parseFloat(text.replace(",", "."));
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Converte "DD/MM/AAAA" + "HH:MM" em Date, ou null se inválido. */
+function parseDateTime(date: string, time: string): Date | null {
+  const d = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const t = time.match(/^(\d{2}):(\d{2})$/);
+  if (!d || !t) return null;
+  const result = new Date(+d[3], +d[2] - 1, +d[1], +t[1], +t[2]);
+  if (result.getDate() !== +d[1] || +t[1] > 23 || +t[2] > 59) return null;
+  return result;
+}
+
+/** Máscara simples para digitação de data/hora. */
+function mask(text: string, pattern: "date" | "time"): string {
+  const digits = text.replace(/\D/g, "");
+  if (pattern === "time") {
+    const v = digits.slice(0, 4);
+    return v.length > 2 ? `${v.slice(0, 2)}:${v.slice(2)}` : v;
+  }
+  const v = digits.slice(0, 8);
+  if (v.length > 4) return `${v.slice(0, 2)}/${v.slice(2, 4)}/${v.slice(4)}`;
+  if (v.length > 2) return `${v.slice(0, 2)}/${v.slice(2)}`;
+  return v;
+}
+
+const fmtDate = (d: Date) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+const fmtTime = (d: Date) => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+function Stepper({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <View style={styles.stepper}>
-      <Pressable
-        style={styles.stepperButton}
-        onPress={() => onChange(Math.max(min, value - 1))}
-      >
-        <Feather name="minus" size={20} color={colors.teal600} />
+      <Pressable style={styles.stepperButton} onPress={() => onChange(Math.max(0, value - 1))}>
+        <Text style={styles.stepperSign}>-</Text>
       </Pressable>
-      <Text style={styles.stepperValue}>
-        {value}
-        {suffix ? ` ${suffix}` : ""}
-      </Text>
-      <Pressable
-        style={styles.stepperButton}
-        onPress={() => onChange(Math.min(max, value + 1))}
-      >
-        <Feather name="plus" size={20} color={colors.teal600} />
+      <Text style={styles.stepperValue}>{value}</Text>
+      <Pressable style={styles.stepperButton} onPress={() => onChange(value + 1)}>
+        <Text style={styles.stepperSign}>+</Text>
       </Pressable>
     </View>
   );
 }
 
-export function OnboardingScreen() {
+function PasswordRule({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <View style={styles.ruleRow}>
+      <View style={[styles.ruleDot, ok && styles.ruleDotOk]}>
+        {ok && <Feather name="check" size={10} color={colors.white} />}
+      </View>
+      <Text style={[styles.ruleText, ok && styles.ruleTextOk]}>{label}</Text>
+    </View>
+  );
+}
+
+type OnboardingScreenProps = {
+  onLogin: () => void;
+};
+
+export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
   const { completeOnboarding } = useApp();
   const [step, setStep] = useState(0);
 
+  // Etapa 1 — cadastro
+  const [authMethod, setAuthMethod] = useState<AuthMethod | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [cigsPerDay, setCigsPerDay] = useState(20);
-  const [packPrice, setPackPrice] = useState("12,50");
-  const [cigsPerPack, setCigsPerPack] = useState(20);
-  const [quitOption, setQuitOption] = useState<QuitOption>(QUIT_OPTIONS[0]);
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const pwHasLength = password.length >= 8;
+  const pwHasLetter = /[a-zA-Z]/.test(password);
+  const pwHasNumber = /[0-9]/.test(password);
+  const pwValid = pwHasLength && pwHasLetter && pwHasNumber;
 
-  const fillSocial = (provider: "google" | "apple") => {
-    // Protótipo: os Provedores de Login Social preenchem uma conta demo.
-    setName("Mariana Silva");
-    setEmail(
-      provider === "google" ? "mariana.silva@gmail.com" : "mariana.silva@icloud.com"
-    );
-  };
+  // Etapa 2 — motivação (3 sub-telas)
+  const [motivSubStep, setMotivSubStep] = useState(0);
+  const [smokeDuration, setSmokeDuration] = useState<SmokeDuration | null>(null);
+  const [stopReason, setStopReason] = useState<StopReason | null>(null);
+  const [stopReasonText, setStopReasonText] = useState("");
+  const [mainFear, setMainFear] = useState<MainFear | null>(null);
+  const [mainFearText, setMainFearText] = useState("");
+
+  // Etapa 3 — termos
+  const [termsScrolled, setTermsScrolled] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsBoxHeight, setTermsBoxHeight] = useState(0);
+
+  // Etapas 4 a 7
+  const [usageType, setUsageType] = useState<UsageType | null>(null);
+  const [cigsPerDay, setCigsPerDay] = useState(15);
+  const [packPrice, setPackPrice] = useState("12,50");
+  const [vape, setVape] = useState<Record<keyof VapeHabits, string>>({
+    nicotineMg: "35",
+    juiceMl: "30",
+    podDays: "15",
+    juicePrice: "80",
+    coilPrice: "30",
+  });
+  const [stopMethod, setStopMethod] = useState<StopMethod | null>(null);
+  const [quitDate, setQuitDate] = useState("");
+  const [quitTime, setQuitTime] = useState("");
+  const quitTimestamp = parseDateTime(quitDate, quitTime);
 
   const finish = () => {
-    const quitDate = new Date();
-    quitDate.setDate(quitDate.getDate() - quitOption.daysAgo);
-    const price = parseFloat(packPrice.replace(",", ".")) || 12.5;
+    if (!quitTimestamp) return;
+    const usesVape = usageType === "vape" || usageType === "ambos";
     completeOnboarding({
-      name: name.trim() || "Visitante",
-      email: email.trim() || "visitante@liberar.app",
-      quitDate: quitDate.toISOString(),
+      name: name.trim() || (authMethod === "email" ? "Visitante" : "Mariana Silva"),
+      email:
+        email.trim() ||
+        (authMethod === "apple" ? "mariana.silva@icloud.com" : "mariana.silva@gmail.com"),
+      authMethod: authMethod ?? "email",
+      quitDate: quitTimestamp.toISOString(),
       cigsPerDay,
-      packPrice: price,
-      cigsPerPack,
+      packPrice: toNumber(packPrice, 12.5),
+      cigsPerPack: 20,
+      usageType: usageType ?? "cigarro",
+      vape: usesVape
+        ? {
+            nicotineMg: toNumber(vape.nicotineMg),
+            juiceMl: toNumber(vape.juiceMl),
+            podDays: Math.max(1, toNumber(vape.podDays, 15)),
+            juicePrice: toNumber(vape.juicePrice),
+            coilPrice: toNumber(vape.coilPrice),
+          }
+        : undefined,
+      stopMethod: stopMethod ?? "abrupto",
+      smokeDuration: smokeDuration ?? undefined,
+      stopReason: stopReason ?? undefined,
+      stopReasonText: stopReasonText.trim() || undefined,
+      mainFear: mainFear ?? undefined,
+      mainFearText: mainFearText.trim() || undefined,
+      tourDone: false,
     });
   };
 
-  const canContinueIdentity = name.trim().length >= 2 && email.includes("@");
+  const nextStep = () => {
+    if (step === 2 && motivSubStep < 2) {
+      setMotivSubStep((s) => s + 1);
+      return;
+    }
+    if (step === 2) setMotivSubStep(0);
+    if (step === 6 && !quitDate) {
+      // Sugestão de Dia D: hoje (parada abrupta) ou daqui a 7 dias (gradual).
+      const base = new Date();
+      if (stopMethod === "gradual") base.setDate(base.getDate() + 7);
+      setQuitDate(fmtDate(base));
+      setQuitTime(fmtTime(new Date()));
+    }
+    if (step < TOTAL_STEPS) setStep(step + 1);
+    else finish();
+  };
+
+  const prevStep = () => {
+    if (step === 2 && motivSubStep > 0) {
+      setMotivSubStep((s) => s - 1);
+      return;
+    }
+    if (step > 0) setStep(step - 1);
+  };
+
+  const disabled =
+    (step === 1 && (authMethod === null || (authMethod === "email" && (!pwValid || !email.includes("@") || name.trim().length < 2)))) ||
+    (step === 2 && motivSubStep === 0 && !smokeDuration) ||
+    (step === 2 && motivSubStep === 1 && !stopReason) ||
+    (step === 2 && motivSubStep === 2 && !mainFear) ||
+    (step === 3 && (!termsScrolled || !termsAccepted)) ||
+    (step === 4 && !usageType) ||
+    (step === 6 && !stopMethod) ||
+    (step === 7 && !quitTimestamp);
+
+  const onTermsScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 24) {
+      setTermsScrolled(true);
+    }
+  };
+
+  if (step === 0) {
+    return (
+      <LinearGradient
+        colors={[colors.blue400, "#2DD4BF"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.welcome}
+      >
+        <Feather name="wind" size={80} color="rgba(255,255,255,0.9)" style={styles.welcomeIcon} />
+        <Text style={styles.welcomeTitle}>LiberAr</Text>
+        <Text style={styles.welcomeSubtitle}>
+          Um respiro de cada vez. Estamos aqui para apoiar sua jornada.
+        </Text>
+        <Pressable style={styles.welcomeButton} onPress={nextStep}>
+          <Text style={styles.welcomeButtonText}>Começar</Text>
+        </Pressable>
+        <View style={styles.loginRow}>
+          <Text style={styles.loginText}>Já tem conta? </Text>
+          <Pressable onPress={onLogin} hitSlop={8}>
+            <Text style={styles.loginLink}>Entrar</Text>
+          </Pressable>
+        </View>
+      </LinearGradient>
+    );
+  }
 
   return (
     <KeyboardAvoidingView
       style={styles.flex}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      {step === 0 && (
-        <LinearGradient
-          colors={[colors.blue400, colors.teal500]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.welcome}
-        >
-          <View style={styles.welcomeIconWrap}>
-            <Feather name="wind" size={56} color={colors.white} />
-          </View>
-          <Text style={styles.welcomeTitle}>LiberAr</Text>
-          <Text style={styles.welcomeSubtitle}>
-            Respire fundo. Sua jornada para uma vida livre do cigarro começa
-            agora — com acolhimento, ciência e um passo de cada vez.
-          </Text>
-          <Pressable style={styles.welcomeButton} onPress={() => setStep(1)}>
-            <Text style={styles.welcomeButtonText}>Começar</Text>
-            <Feather name="arrow-right" size={20} color={colors.teal600} />
-          </Pressable>
-          <Text style={styles.welcomeFootnote}>
-            Baseado no Programa Nacional de Controle do Tabagismo
-          </Text>
-        </LinearGradient>
-      )}
+      {/* Cabeçalho: voltar + indicador de progresso */}
+      <View style={styles.topBar}>
+        <Pressable onPress={prevStep} style={styles.backButton} hitSlop={8}>
+          <Feather name="arrow-left" size={24} color={colors.slate500} />
+        </Pressable>
+        <View style={styles.dots}>
+          {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map((i) => (
+            <View key={i} style={[styles.dot, step >= i && styles.dotActive]} />
+          ))}
+        </View>
+        <View style={styles.backButton} />
+      </View>
 
-      {step > 0 && (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Indicador de progresso */}
-          <View style={styles.dots}>
-            {[1, 2, 3].map((s) => (
-              <View key={s} style={[styles.dot, step >= s && styles.dotActive]} />
-            ))}
-          </View>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        {step === 1 && (
+          <View style={styles.stepBody}>
+            <Text style={styles.stepTitle}>Como podemos te chamar?</Text>
 
-          {step === 1 && (
-            <View style={styles.stepBody}>
-              <Text style={styles.stepTitle}>Vamos nos conhecer</Text>
-              <Text style={styles.stepSubtitle}>
-                Como podemos te chamar nessa caminhada?
-              </Text>
+            {authMethod !== "email" && (
+              <View style={styles.gap12}>
+                <Pressable
+                  onPress={() => setAuthMethod("google")}
+                  style={[styles.googleButton, authMethod === "google" && styles.googleButtonActive]}
+                >
+                  <FontAwesome name="google" size={18} color={authMethod === "google" ? colors.teal800 : colors.slate700} />
+                  <Text style={[styles.socialText, authMethod === "google" && { color: colors.teal800 }]}>
+                    Continuar com Google
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setAuthMethod("apple")}
+                  style={[styles.appleButton, authMethod === "apple" && styles.appleButtonActive]}
+                >
+                  <FontAwesome name="apple" size={20} color={colors.white} />
+                  <Text style={[styles.socialText, { color: colors.white }]}>Continuar com Apple</Text>
+                </Pressable>
+                {authMethod === null && (
+                  <View style={styles.dividerRow}>
+                    <View style={styles.divider} />
+                    <Text style={styles.dividerText}>ou use seu e-mail</Text>
+                    <View style={styles.divider} />
+                  </View>
+                )}
+              </View>
+            )}
 
-              <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Nome</Text>
+            {(authMethod === null || authMethod === "email") && (
+              <View style={styles.gap12}>
                 <TextInput
                   style={styles.input}
                   placeholder="Seu nome"
                   placeholderTextColor={colors.slate400}
                   value={name}
                   onChangeText={setName}
+                  onFocus={() => setAuthMethod("email")}
                 />
-                <Text style={styles.fieldLabel}>E-mail</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="seu@email.com"
+                  placeholder="Seu e-mail"
                   placeholderTextColor={colors.slate400}
                   autoCapitalize="none"
                   keyboardType="email-address"
                   value={email}
                   onChangeText={setEmail}
+                  onFocus={() => setAuthMethod("email")}
                 />
+                {authMethod === "email" && (
+                  <>
+                    <View>
+                      <TextInput
+                        style={[styles.input, styles.passwordInput]}
+                        placeholder="Senha"
+                        placeholderTextColor={colors.slate400}
+                        secureTextEntry={!showPw}
+                        autoCapitalize="none"
+                        value={password}
+                        onChangeText={setPassword}
+                      />
+                      <Pressable style={styles.eye} onPress={() => setShowPw((v) => !v)} hitSlop={8}>
+                        <Feather name={showPw ? "eye-off" : "eye"} size={20} color={colors.slate400} />
+                      </Pressable>
+                    </View>
+                    {password.length > 0 && (
+                      <View style={styles.rules}>
+                        <PasswordRule ok={pwHasLength} label="Mínimo 8 caracteres" />
+                        <PasswordRule ok={pwHasLetter} label="Pelo menos uma letra" />
+                        <PasswordRule ok={pwHasNumber} label="Pelo menos um número" />
+                      </View>
+                    )}
+                    <Pressable onPress={() => setAuthMethod(null)}>
+                      <Text style={styles.switchMethod}>Prefiro entrar com Google ou Apple</Text>
+                    </Pressable>
+                  </>
+                )}
               </View>
+            )}
 
-              <View style={styles.dividerRow}>
-                <View style={styles.divider} />
-                <Text style={styles.dividerText}>ou continue com</Text>
-                <View style={styles.divider} />
-              </View>
-
-              <View style={styles.socialRow}>
-                <Pressable style={styles.socialButton} onPress={() => fillSocial("google")}>
-                  <FontAwesome name="google" size={18} color={colors.slate700} />
-                  <Text style={styles.socialText}>Google</Text>
+            {(authMethod === "google" || authMethod === "apple") && (
+              <View style={styles.socialChosen}>
+                <Text style={styles.socialChosenText}>
+                  Entrando com {authMethod === "google" ? "Google" : "Apple"}
+                </Text>
+                <Pressable onPress={() => setAuthMethod(null)} hitSlop={8}>
+                  <Text style={styles.switchLink}>Trocar</Text>
                 </Pressable>
-                <Pressable style={styles.socialButton} onPress={() => fillSocial("apple")}>
-                  <FontAwesome name="apple" size={20} color={colors.slate700} />
-                  <Text style={styles.socialText}>Apple</Text>
-                </Pressable>
               </View>
+            )}
 
-              <Text style={styles.lgpdNote}>
-                Seus dados ficam no seu dispositivo e são tratados conforme a
-                LGPD. Você pode exportá-los ou apagá-los quando quiser.
-              </Text>
+            <View style={styles.lgpdRow}>
+              <Feather name="shield" size={12} color={colors.slate400} />
+              <Text style={styles.lgpdNote}>Seus dados estão seguros e seguem a LGPD.</Text>
             </View>
-          )}
+          </View>
+        )}
 
-          {step === 2 && (
-            <View style={styles.stepBody}>
-              <Text style={styles.stepTitle}>Seus hábitos</Text>
-              <Text style={styles.stepSubtitle}>
-                Usamos isso para calcular sua economia e seus marcos de saúde.
-                Sem julgamentos — é só matemática a seu favor.
-              </Text>
+        {step === 2 && motivSubStep === 0 && (
+          <View style={styles.stepBody}>
+            <View>
+              <Text style={styles.kicker}>Nos conte um pouco</Text>
+              <Text style={styles.stepTitle}>Há quanto tempo você fuma?</Text>
+            </View>
+            {SMOKE_DURATION_OPTIONS.map((opt) => (
+              <SelectCard
+                key={opt.value}
+                title={opt.label}
+                active={smokeDuration === opt.value}
+                onPress={() => setSmokeDuration(opt.value)}
+                style={styles.bigOption}
+              />
+            ))}
+          </View>
+        )}
 
-              <View style={styles.habitCard}>
-                <Text style={styles.habitLabel}>Cigarros por dia</Text>
-                <Stepper value={cigsPerDay} onChange={setCigsPerDay} />
+        {step === 2 && motivSubStep === 1 && (
+          <View style={styles.stepBody}>
+            <View>
+              <Text style={styles.kicker}>Sua motivação</Text>
+              <Text style={styles.stepTitle}>Qual seu principal motivo para parar?</Text>
+            </View>
+            <View style={styles.grid}>
+              {STOP_REASON_OPTIONS.map((opt) => (
+                <SelectCard
+                  key={opt.value}
+                  title={opt.label}
+                  active={stopReason === opt.value}
+                  onPress={() => setStopReason(opt.value)}
+                  style={[styles.gridItem, opt.value === "outro" && styles.gridItemFull]}
+                />
+              ))}
+            </View>
+            {stopReason && (
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Conte um pouco mais (opcional)..."
+                placeholderTextColor={colors.slate400}
+                multiline
+                value={stopReasonText}
+                onChangeText={setStopReasonText}
+              />
+            )}
+          </View>
+        )}
+
+        {step === 2 && motivSubStep === 2 && (
+          <View style={styles.stepBody}>
+            <View>
+              <Text style={styles.kicker}>Seus desafios</Text>
+              <Text style={styles.stepTitle}>Qual seu maior receio em parar?</Text>
+            </View>
+            {MAIN_FEAR_OPTIONS.map((opt) => (
+              <SelectCard
+                key={opt.value}
+                title={opt.label}
+                active={mainFear === opt.value}
+                onPress={() => setMainFear(opt.value)}
+                style={styles.bigOption}
+              />
+            ))}
+            {mainFear && (
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="Quer falar mais sobre isso? (opcional)"
+                placeholderTextColor={colors.slate400}
+                multiline
+                value={mainFearText}
+                onChangeText={setMainFearText}
+              />
+            )}
+          </View>
+        )}
+
+        {step === 3 && (
+          <View style={styles.stepBody}>
+            <View>
+              <Text style={styles.stepTitle}>Termos de Uso e Privacidade</Text>
+              <Text style={styles.stepSubtitle}>Role até o final para aceitar e continuar.</Text>
+            </View>
+            <ScrollView
+              style={styles.termsBox}
+              contentContainerStyle={styles.termsContent}
+              nestedScrollEnabled
+              onScroll={onTermsScroll}
+              scrollEventThrottle={32}
+              onLayout={(e) => setTermsBoxHeight(e.nativeEvent.layout.height)}
+              onContentSizeChange={(_, h) => {
+                // Em telas altas o texto pode caber inteiro: libera o aceite.
+                if (termsBoxHeight > 0 && h <= termsBoxHeight + 24) setTermsScrolled(true);
+              }}
+            >
+              {TERMS_SECTIONS.map((s) => (
+                <View key={s.title}>
+                  <Text style={styles.termsTitle}>{s.title}</Text>
+                  <Text style={styles.termsBody}>{s.body}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            {!termsScrolled && (
+              <View style={styles.lgpdRow}>
+                <Feather name="info" size={12} color={colors.slate400} />
+                <Text style={styles.lgpdNote}>Role o texto até o final para habilitar o aceite</Text>
               </View>
+            )}
+            <Pressable
+              style={[styles.acceptRow, !termsScrolled && styles.acceptRowDisabled]}
+              disabled={!termsScrolled}
+              onPress={() => setTermsAccepted((v) => !v)}
+            >
+              <View style={[styles.checkbox, termsAccepted && styles.checkboxOn]}>
+                {termsAccepted && <Feather name="check" size={13} color={colors.white} />}
+              </View>
+              <Text style={styles.acceptText}>
+                Li e aceito os <Text style={styles.acceptStrong}>Termos de Uso</Text> e a{" "}
+                <Text style={styles.acceptStrong}>Política de Privacidade</Text>
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
-              <View style={styles.habitCard}>
-                <Text style={styles.habitLabel}>Preço do maço</Text>
-                <View style={styles.priceRow}>
-                  <Text style={styles.pricePrefix}>R$</Text>
+        {step === 4 && (
+          <View style={styles.stepBody}>
+            <Text style={styles.stepTitle}>O que você usa?</Text>
+            <Text style={styles.stepSubtitle}>Isso nos ajuda a personalizar seu acompanhamento.</Text>
+            {USAGE_OPTIONS.map((opt) => (
+              <SelectCard
+                key={opt.value}
+                title={opt.value === "ambos" ? "Ambos" : opt.label}
+                large
+                active={usageType === opt.value}
+                onPress={() => setUsageType(opt.value)}
+                style={styles.bigOption}
+              />
+            ))}
+          </View>
+        )}
+
+        {step === 5 && (
+          <View style={styles.stepBody}>
+            <Text style={styles.stepTitle}>Vamos entender seus hábitos</Text>
+
+            {(usageType === "cigarro" || usageType === "ambos") && (
+              <View style={styles.gap12}>
+                {usageType === "ambos" && <Text style={styles.groupLabel}>Cigarro</Text>}
+                <View style={styles.habitRow}>
+                  <Text style={styles.habitLabel}>Cigarros por dia</Text>
+                  <Stepper value={cigsPerDay} onChange={setCigsPerDay} />
+                </View>
+                <View style={styles.habitRow}>
+                  <Text style={styles.habitLabel}>Preço do maço (R$)</Text>
                   <TextInput
-                    style={styles.priceInput}
+                    style={styles.habitInput}
                     keyboardType="decimal-pad"
                     value={packPrice}
                     onChangeText={setPackPrice}
                   />
                 </View>
               </View>
+            )}
 
-              <View style={styles.habitCard}>
-                <Text style={styles.habitLabel}>Cigarros por maço</Text>
-                <Stepper value={cigsPerPack} onChange={setCigsPerPack} min={10} max={40} />
-              </View>
-            </View>
-          )}
-
-          {step === 3 && (
-            <View style={styles.stepBody}>
-              <Text style={styles.stepTitle}>Seu Dia D 🎯</Text>
-              <Text style={styles.stepSubtitle}>
-                O Dia D é o dia em que você parou (ou vai parar) de fumar.
-                Quando foi o seu?
-              </Text>
-
-              <View style={styles.quitOptions}>
-                {QUIT_OPTIONS.map((opt) => (
-                  <Pressable
-                    key={opt.label}
-                    onPress={() => setQuitOption(opt)}
-                    style={[
-                      styles.quitChip,
-                      quitOption.label === opt.label && styles.quitChipActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.quitChipText,
-                        quitOption.label === opt.label && styles.quitChipTextActive,
-                      ]}
-                    >
-                      {opt.label}
-                    </Text>
-                  </Pressable>
+            {(usageType === "vape" || usageType === "ambos") && (
+              <View style={styles.gap12}>
+                {usageType === "ambos" && <Text style={styles.groupLabel}>Vape</Text>}
+                {VAPE_FIELDS.map((f) => (
+                  <View key={f.key} style={styles.habitRow}>
+                    <Text style={styles.habitLabel}>{f.label}</Text>
+                    <TextInput
+                      style={styles.habitInput}
+                      keyboardType="decimal-pad"
+                      value={vape[f.key]}
+                      onChangeText={(v) => setVape((prev) => ({ ...prev, [f.key]: v }))}
+                    />
+                  </View>
                 ))}
               </View>
+            )}
+          </View>
+        )}
 
-              <View style={styles.tipCard}>
-                <Feather name="info" size={18} color={colors.blue600} />
+        {step === 6 && (
+          <View style={styles.stepBody}>
+            <Text style={styles.stepTitle}>Como você pretende parar?</Text>
+            <SelectCard
+              title="De uma vez"
+              note="Parada abrupta no seu Dia D. Ideal se você quer cortar os laços de forma definitiva."
+              large
+              active={stopMethod === "abrupto"}
+              onPress={() => setStopMethod("abrupto")}
+              style={styles.bigOption}
+            />
+            <SelectCard
+              title="Gradualmente"
+              note="Redução progressiva. Vamos te ajudar a diminuir a quantidade até chegar a zero."
+              large
+              active={stopMethod === "gradual"}
+              onPress={() => setStopMethod("gradual")}
+              style={styles.bigOption}
+            />
+          </View>
+        )}
+
+        {step === 7 && (
+          <View style={styles.stepBody}>
+            <Text style={styles.stepTitle}>Seu Dia D</Text>
+            <Text style={styles.fieldLabel}>Quando você parou (ou vai parar)?</Text>
+            <View style={styles.iconInputWrap}>
+              <Feather name="calendar" size={20} color={colors.teal500} style={styles.inputIcon} />
+              <TextInput
+                style={[styles.input, styles.iconInput]}
+                placeholder="DD/MM/AAAA"
+                placeholderTextColor={colors.slate400}
+                keyboardType="number-pad"
+                value={quitDate}
+                onChangeText={(t) => setQuitDate(mask(t, "date"))}
+              />
+            </View>
+            <View style={styles.iconInputWrap}>
+              <Feather name="clock" size={20} color={colors.teal500} style={styles.inputIcon} />
+              <TextInput
+                style={[styles.input, styles.iconInput]}
+                placeholder="HH:MM"
+                placeholderTextColor={colors.slate400}
+                keyboardType="number-pad"
+                value={quitTime}
+                onChangeText={(t) => setQuitTime(mask(t, "time"))}
+              />
+            </View>
+            {quitDate.length === 10 && quitTime.length === 5 && !quitTimestamp && (
+              <Text style={styles.errorText}>Data ou horário inválido.</Text>
+            )}
+
+            <View style={styles.tipCard}>
+              <Feather name="info" size={22} color={colors.blue500} />
+              <View style={styles.flex1}>
+                <Text style={styles.tipTitle}>O que é o Dia D?</Text>
                 <Text style={styles.tipText}>
-                  Ainda não parou? Escolha "Hoje" e faça deste o seu Dia D. O
-                  Assistente LiberAr te acompanha desde o primeiro minuto.
+                  É a data oficial em que você inicia sua jornada livre do fumo. Não se preocupe se
+                  ainda não parou, marque a data que você escolheu. Estaremos com você!
                 </Text>
               </View>
             </View>
-          )}
-
-          {/* Navegação entre etapas */}
-          <View style={styles.stepNav}>
-            <Pressable style={styles.backLink} onPress={() => setStep(step - 1)}>
-              <Feather name="arrow-left" size={18} color={colors.slate500} />
-              <Text style={styles.backLinkText}>Voltar</Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.nextButton,
-                step === 1 && !canContinueIdentity && styles.nextButtonDisabled,
-              ]}
-              disabled={step === 1 && !canContinueIdentity}
-              onPress={() => (step === 3 ? finish() : setStep(step + 1))}
-            >
-              <Text style={styles.nextButtonText}>
-                {step === 3 ? "Começar jornada" : "Continuar"}
-              </Text>
-              <Feather name="arrow-right" size={18} color={colors.white} />
-            </Pressable>
           </View>
-        </ScrollView>
-      )}
+        )}
+      </ScrollView>
+
+      <View style={styles.footer}>
+        <PrimaryButton
+          label={step === 7 ? "Começar jornada" : step === 3 ? "Concluir Cadastro" : "Continuar"}
+          onPress={nextStep}
+          disabled={disabled}
+        />
+        {step === 2 && <PrimaryButton label="Pular" variant="ghost" onPress={nextStep} />}
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: colors.slate50 },
-  welcome: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-  },
-  welcomeIconWrap: {
-    width: 112,
-    height: 112,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 24,
-  },
-  welcomeTitle: {
-    fontSize: 40,
-    fontWeight: "700",
-    color: colors.white,
-    marginBottom: 12,
-  },
+  flex: { flex: 1, backgroundColor: colors.white },
+  flex1: { flex: 1 },
+  gap12: { gap: 12 },
+  welcome: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
+  welcomeIcon: { marginBottom: 24 },
+  welcomeTitle: { fontSize: 36, fontWeight: "700", color: colors.white, marginBottom: 16 },
   welcomeSubtitle: {
-    fontSize: 16,
+    fontSize: 18,
     color: "rgba(255,255,255,0.9)",
     textAlign: "center",
-    lineHeight: 24,
-    marginBottom: 40,
+    lineHeight: 26,
+    marginBottom: 48,
   },
   welcomeButton: {
-    flexDirection: "row",
+    alignSelf: "stretch",
     alignItems: "center",
-    gap: 8,
     backgroundColor: colors.white,
-    paddingHorizontal: 32,
     paddingVertical: 16,
-    borderRadius: 999,
+    borderRadius: 16,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 6,
   },
-  welcomeButtonText: {
-    color: colors.teal600,
-    fontWeight: "700",
-    fontSize: 18,
-  },
-  welcomeFootnote: {
-    position: "absolute",
-    bottom: 40,
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 12,
-  },
-  content: {
-    padding: 24,
-    paddingTop: 16,
-    gap: 24,
-    flexGrow: 1,
-  },
-  dots: {
+  welcomeButtonText: { color: colors.teal600, fontWeight: "700", fontSize: 16 },
+  loginRow: { flexDirection: "row", alignItems: "center", paddingTop: 16 },
+  loginText: { color: "rgba(255,255,255,0.9)", fontSize: 14 },
+  loginLink: { color: colors.white, fontWeight: "700", fontSize: 14, textDecorationLine: "underline" },
+  topBar: {
     flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 8,
   },
-  dot: {
-    width: 32,
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: colors.slate200,
-  },
-  dotActive: {
-    backgroundColor: colors.teal500,
-  },
-  stepBody: {
-    gap: 16,
-    flexGrow: 1,
-  },
-  stepTitle: {
-    fontSize: 24,
+  backButton: { width: 40, padding: 8 },
+  dots: { flexDirection: "row", gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 999, backgroundColor: colors.slate200 },
+  dotActive: { backgroundColor: colors.teal500 },
+  content: { padding: 24, paddingTop: 16, flexGrow: 1 },
+  stepBody: { gap: 16 },
+  kicker: {
+    fontSize: 12,
     fontWeight: "700",
-    color: colors.slate800,
-    textAlign: "center",
-    marginTop: 8,
-  },
-  stepSubtitle: {
-    fontSize: 14,
-    color: colors.slate500,
-    textAlign: "center",
-    lineHeight: 21,
+    color: colors.teal500,
+    textTransform: "uppercase",
+    letterSpacing: 1,
     marginBottom: 8,
   },
-  fieldGroup: {
-    gap: 8,
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.slate600,
-    marginTop: 8,
-  },
+  stepTitle: { fontSize: 24, fontWeight: "700", color: colors.slate800 },
+  stepSubtitle: { fontSize: 14, color: colors.slate500, marginTop: 4 },
   input: {
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.slate200,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 12,
+    padding: 16,
     fontSize: 15,
     color: colors.slate800,
   },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginVertical: 8,
-  },
-  divider: {
-    flex: 1,
-    height: 1,
+  passwordInput: { paddingRight: 48 },
+  eye: { position: "absolute", right: 16, top: 16 },
+  textArea: { minHeight: 80, textAlignVertical: "top", fontSize: 14 },
+  rules: { backgroundColor: colors.slate50, borderRadius: 12, padding: 12, gap: 6 },
+  ruleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  ruleDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
     backgroundColor: colors.slate200,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  dividerText: {
-    fontSize: 12,
-    color: colors.slate400,
-  },
-  socialRow: {
-    flexDirection: "row",
-    gap: 16,
-  },
-  socialButton: {
-    flex: 1,
+  ruleDotOk: { backgroundColor: colors.teal500 },
+  ruleText: { fontSize: 12, color: colors.slate400 },
+  ruleTextOk: { color: colors.teal800, fontWeight: "500" },
+  switchMethod: { fontSize: 12, color: colors.slate400, textAlign: "center", textDecorationLine: "underline" },
+  googleButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    backgroundColor: colors.white,
-    borderWidth: 1,
+    gap: 10,
+    borderWidth: 2,
     borderColor: colors.slate200,
-    borderRadius: 16,
-    paddingVertical: 14,
+    borderRadius: 12,
+    padding: 16,
   },
-  socialText: {
-    fontWeight: "600",
-    color: colors.slate700,
-    fontSize: 14,
+  googleButtonActive: { borderColor: colors.teal500, backgroundColor: colors.teal50 },
+  appleButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#000",
+    borderRadius: 12,
+    padding: 16,
   },
-  lgpdNote: {
-    fontSize: 12,
-    color: colors.slate400,
-    textAlign: "center",
-    lineHeight: 18,
-    marginTop: 8,
-  },
-  habitCard: {
-    backgroundColor: colors.white,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.slate100,
-    padding: 20,
+  appleButtonActive: { backgroundColor: colors.slate800 },
+  socialText: { fontWeight: "600", color: colors.slate700, fontSize: 15 },
+  dividerRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
+  divider: { flex: 1, height: 1, backgroundColor: colors.slate200 },
+  dividerText: { fontSize: 12, color: colors.slate400, fontWeight: "500" },
+  socialChosen: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-  },
-  habitLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.slate700,
-    flexShrink: 1,
-  },
-  stepper: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  stepperButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
     backgroundColor: colors.teal50,
-    alignItems: "center",
-    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#99F6E4",
+    borderRadius: 12,
+    padding: 16,
   },
-  stepperValue: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: colors.slate800,
-    minWidth: 36,
-    textAlign: "center",
-  },
-  priceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  pricePrefix: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: colors.slate500,
-  },
-  priceInput: {
+  socialChosenText: { fontSize: 14, fontWeight: "600", color: colors.teal800 },
+  switchLink: { fontSize: 12, color: colors.slate400, textDecorationLine: "underline" },
+  lgpdRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
+  lgpdNote: { fontSize: 12, color: colors.slate400 },
+  bigOption: { padding: 20 },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  gridItem: { width: "47.5%", alignItems: "center" },
+  gridItemFull: { width: "100%" },
+  termsBox: {
+    maxHeight: 340,
     backgroundColor: colors.slate50,
     borderWidth: 1,
     borderColor: colors.slate200,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.slate800,
-    minWidth: 90,
-    textAlign: "center",
+    borderRadius: 16,
   },
-  quitOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  termsContent: { padding: 20, gap: 16 },
+  termsTitle: { fontWeight: "700", color: colors.slate800, fontSize: 14, marginBottom: 4 },
+  termsBody: { fontSize: 14, color: colors.slate600, lineHeight: 21 },
+  acceptRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  acceptRowDisabled: { opacity: 0.4 },
+  checkbox: {
+    marginTop: 1,
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.slate300,
+    alignItems: "center",
     justifyContent: "center",
+    backgroundColor: colors.white,
+  },
+  checkboxOn: { backgroundColor: colors.teal500, borderColor: colors.teal500 },
+  acceptText: { flex: 1, fontSize: 14, color: colors.slate700, lineHeight: 20 },
+  acceptStrong: { fontWeight: "600", color: colors.teal600 },
+  groupLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.slate400,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  habitRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.slate50,
+    padding: 16,
+    borderRadius: 16,
     gap: 12,
   },
-  quitChip: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
+  habitLabel: { flex: 1, fontWeight: "600", fontSize: 14, color: colors.slate800 },
+  habitInput: {
+    width: 84,
+    textAlign: "right",
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    borderRadius: 8,
+    padding: 8,
+    fontWeight: "700",
+    color: colors.teal800,
+  },
+  stepper: { flexDirection: "row", alignItems: "center", gap: 12 },
+  stepperButton: {
+    width: 32,
+    height: 32,
     borderRadius: 999,
     backgroundColor: colors.white,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.slate200,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  quitChipActive: {
-    backgroundColor: colors.teal50,
-    borderColor: colors.teal500,
+  stepperSign: { color: colors.teal600, fontWeight: "700", fontSize: 16 },
+  stepperValue: { minWidth: 24, textAlign: "center", fontWeight: "700", color: colors.slate800 },
+  fieldLabel: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  iconInputWrap: { justifyContent: "center" },
+  inputIcon: { position: "absolute", left: 16, zIndex: 1 },
+  iconInput: {
+    paddingLeft: 48,
+    borderWidth: 2,
+    borderRadius: 16,
+    fontWeight: "700",
+    color: colors.slate700,
   },
-  quitChipText: {
-    fontWeight: "600",
-    color: colors.slate600,
-    fontSize: 15,
-  },
-  quitChipTextActive: {
-    color: colors.teal600,
-  },
+  errorText: { fontSize: 12, color: colors.rose500 },
   tipCard: {
     flexDirection: "row",
     gap: 12,
@@ -533,54 +845,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.blue100,
     borderRadius: 16,
-    padding: 16,
+    padding: 20,
     marginTop: 8,
   },
-  tipText: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.blue800,
-    lineHeight: 19,
-  },
-  stepNav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
-  backLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    padding: 8,
-  },
-  backLinkText: {
-    color: colors.slate500,
-    fontWeight: "600",
-    fontSize: 14,
-  },
-  nextButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: colors.teal500,
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 999,
-    shadowColor: colors.teal500,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  nextButtonDisabled: {
-    backgroundColor: colors.slate300,
-    shadowOpacity: 0,
-  },
-  nextButtonText: {
-    color: colors.white,
-    fontWeight: "700",
-    fontSize: 16,
-  },
+  tipTitle: { fontWeight: "700", color: colors.blue800, marginBottom: 4, fontSize: 14 },
+  tipText: { fontSize: 14, color: colors.blue800, lineHeight: 20, opacity: 0.9 },
+  footer: { padding: 24, paddingTop: 12, backgroundColor: colors.white, gap: 4 },
 });

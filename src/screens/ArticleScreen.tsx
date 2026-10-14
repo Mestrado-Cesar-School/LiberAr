@@ -10,9 +10,11 @@ import { colors } from "../theme/colors";
 type ArticleScreenProps = {
   article: Article;
   onClose: () => void;
+  /** Abre o Chat para conversar sobre o artigo. */
+  onChat: () => void;
 };
 
-export function ArticleScreen({ article, onClose }: ArticleScreenProps) {
+export function ArticleScreen({ article, onClose, onChat }: ArticleScreenProps) {
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
@@ -54,6 +56,11 @@ export function ArticleScreen({ article, onClose }: ArticleScreenProps) {
               hora.
             </Text>
           </View>
+
+          <Pressable style={styles.chatButton} onPress={onChat}>
+            <Feather name="message-circle" size={18} color={colors.white} />
+            <Text style={styles.chatButtonText}>Conversar sobre isso</Text>
+          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -61,6 +68,17 @@ export function ArticleScreen({ article, onClose }: ArticleScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  chatButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: colors.teal500,
+    paddingVertical: 14,
+    borderRadius: 16,
+    marginTop: 16,
+  },
+  chatButtonText: { color: colors.white, fontWeight: "600", fontSize: 15 },
   container: {
     flex: 1,
     backgroundColor: colors.white,
