@@ -62,6 +62,8 @@ function Root() {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
   const [showPanicModal, setShowPanicModal] = useState(false);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  // Tela para onde "Meu Tratamento" volta quando foi aberta a partir do relatório.
+  const [treatmentReturnTo, setTreatmentReturnTo] = useState<Overlay>(null);
   const [activeArticle, setActiveArticle] = useState<Article | null>(null);
   const showTour = profile ? profile.tourDone === false : false;
   const onTourStep = useCallback((tab: TabKey) => setActiveTab(tab), []);
@@ -107,9 +109,25 @@ function Root() {
       case "fagerstrom":
         return <FagerstromTestScreen onClose={closeOverlay} />;
       case "treatment":
-        return <TreatmentScreen onClose={closeOverlay} />;
+        return (
+          <TreatmentScreen
+            onClose={() => {
+              const back = treatmentReturnTo;
+              setTreatmentReturnTo(null);
+              setOverlay(back);
+            }}
+          />
+        );
       case "report":
-        return <ReportScreen onClose={closeOverlay} onEditTreatment={() => setOverlay("treatment")} />;
+        return (
+          <ReportScreen
+            onClose={closeOverlay}
+            onEditTreatment={() => {
+              setTreatmentReturnTo("report");
+              setOverlay("treatment");
+            }}
+          />
+        );
       case "triggers":
         return <TriggersScreen onClose={closeOverlay} />;
       case "edit-profile":
