@@ -118,6 +118,8 @@ function Block({ block }: { block: ReportBlock }) {
 export function ReportScreen({ onClose, onEditTreatment }: ReportScreenProps) {
   const { profile, progress, checkIns, cycles, fagerstrom, treatment } = useApp();
   const [printing, setPrinting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const isWeb = Platform.OS === "web";
 
   const model = useMemo(
     () =>
@@ -131,20 +133,27 @@ export function ReportScreen({ onClose, onEditTreatment }: ReportScreenProps) {
 
   const exportPdf = async () => {
     setPrinting(true);
+    setExportError(null);
     try {
-      const html = reportHtml(model);
-      if (Platform.OS === "web") {
-        // No navegador, imprime numa janela própria só com o relatório.
+      if (isWeb) {
+        // No navegador, abre o relatório numa aba própria com um botão de
+        // imprimir. Não chama window.print() automaticamente: o diálogo de
+        // impressão bloqueia a aba do app enquanto estiver aberto.
         const w = window.open("", "_blank");
-        if (w) {
-          w.document.write(html);
-          w.document.close();
-          w.focus();
-          setTimeout(() => w.print(), 300);
+        if (!w) {
+          setExportError(
+            "O navegador bloqueou a nova aba. Permita pop-ups para este site e tente novamente."
+          );
+          return;
         }
+        w.document.write(reportHtml(model, { toolbar: true }));
+        w.document.close();
+        w.focus();
       } else {
-        await Print.printAsync({ html });
+        await Print.printAsync({ html: reportHtml(model) });
       }
+    } catch {
+      setExportError("Não foi possível gerar o relatório. Tente novamente.");
     } finally {
       setPrinting(false);
     }
@@ -206,12 +215,18 @@ export function ReportScreen({ onClose, onEditTreatment }: ReportScreenProps) {
       </ScrollView>
 
       <Footer>
+        {exportError ? <Text style={styles.exportError}>{exportError}</Text> : null}
         <PrimaryButton
-          label={printing ? "Gerando..." : "Salvar como PDF"}
+          label={printing ? "Gerando..." : isWeb ? "Abrir relatório para salvar em PDF" : "Salvar como PDF"}
           icon="file-text"
           onPress={exportPdf}
           disabled={printing}
         />
+        {isWeb ? (
+          <Text style={styles.exportHint}>
+            Abre em uma nova aba. Lá, use Imprimir e escolha "Salvar como PDF".
+          </Text>
+        ) : null}
         <PrimaryButton label="Editar dados do tratamento" variant="secondary" onPress={onEditTreatment} />
       </Footer>
     </View>
@@ -220,6 +235,8 @@ export function ReportScreen({ onClose, onEditTreatment }: ReportScreenProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.slate200 },
+  exportHint: { fontSize: 12, color: colors.slate500, textAlign: "center", marginTop: -4 },
+  exportError: { fontSize: 12, color: colors.rose500, textAlign: "center" },
   scroll: { padding: 16, paddingBottom: 32 },
   paper: {
     backgroundColor: colors.white,
