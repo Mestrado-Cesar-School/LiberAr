@@ -13,6 +13,18 @@ import { formatBRL, formatFreeTime, formatLifeGained, pad2 } from "../core/progr
 import { avatarUri } from "../data/clinical";
 import { colors } from "../theme/colors";
 
+/** Tempo até a próxima conquista em minutos, horas ou dias ("19 min restantes"). */
+function formatRemaining(minutes: number): string {
+  const m = Math.max(1, Math.ceil(minutes));
+  if (m < 60) return `${m} min restante${m === 1 ? "" : "s"}`;
+  if (m < 1440) {
+    const h = Math.ceil(m / 60);
+    return `${h} h restante${h === 1 ? "" : "s"}`;
+  }
+  const d = Math.ceil(m / 1440);
+  return `${d} dia${d === 1 ? "" : "s"} restante${d === 1 ? "" : "s"}`;
+}
+
 // Dashboard Principal de Métricas (fluxo 2 do diagrama:
 // "Acompanha Dias e Economia"). Tudo calculado pelo Motor de Progresso.
 
@@ -42,9 +54,7 @@ export function HomeScreen({
   const achievements = evaluateAchievements(totalMinutes);
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
   const next = nextAchievement(totalMinutes);
-  const nextDaysLeft = next
-    ? Math.max(1, Math.ceil((next.thresholdMinutes - totalMinutes) / 1440))
-    : 0;
+  const nextRemaining = next ? formatRemaining(next.thresholdMinutes - totalMinutes) : "";
 
   const checkInDone = todaysCheckIn !== null;
 
@@ -181,7 +191,7 @@ export function HomeScreen({
             />
           </View>
           <Text style={styles.nextRemaining}>
-            {nextDaysLeft} dia{nextDaysLeft === 1 ? "" : "s"} restante{nextDaysLeft === 1 ? "" : "s"}
+            {nextRemaining}
           </Text>
         </Pressable>
       ) : (

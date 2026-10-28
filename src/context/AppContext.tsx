@@ -346,10 +346,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await storage.saveTriggers(next);
       const r = await sync.pushOp({ kind: "trigger.post", payload: entry });
       if (!r.queued) {
-        // Guarda o id do servidor no registro recém-criado.
-        const withId = [r.result, ...triggers];
-        setTriggers(withId);
-        await storage.saveTriggers(withId);
+        // Substitui o registro otimista pelo do servidor (com id), sem depender
+        // do estado capturado antes do await.
+        let withId: TriggerEntry[] = [];
+        setTriggers((prev) => {
+          withId = prev.map((t) => (t === entry || (t.date === entry.date && !t.id) ? r.result : t));
+          return withId;
+        });
+        await storage.saveTriggers(withId.length ? withId : [r.result, ...triggers.filter((t) => t !== entry)]);
       }
     },
     [triggers]
