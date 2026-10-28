@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: liberar-postgres
+    environment:
+      POSTGRES_USER: liberar
+      POSTGRES_PASSWORD: liberar
+      POSTGRES_DB: liberar
+    ports:
+      - "5434:5432"
+    volumes:
+      - liberar-pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U liberar -d liberar"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./server
+    container_name: liberar-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://liberar:liberar@postgres:5432/liberar
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-LiberAr <no-reply@liberar.app>}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "4000:4000"
+
+volumes:
+  liberar-pgdata:

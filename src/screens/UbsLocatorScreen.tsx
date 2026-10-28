@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Linking,
   Pressable,
@@ -9,11 +9,14 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { HealthUnit } from "../core/types";
+import { healthUnits as healthUnitsApi } from "../data/api";
 import { HEALTH_UNITS } from "../data/ubsUnits";
 import { colors } from "../theme/colors";
 
 // Localizador de Unidades de Saúde (fluxo 4 do diagrama:
-// "Busca Atendimento Gratuito"). Consulta a Base Estática UBS/CAPS.
+// "Busca Atendimento Gratuito"). As unidades vêm da API (GET /health-units);
+// sem rede, usa a Base Estática UBS/CAPS como fallback.
 
 type Filter = "todas" | "UBS" | "CAPS";
 
@@ -24,10 +27,35 @@ type UbsLocatorScreenProps = {
 export function UbsLocatorScreen({ onClose }: UbsLocatorScreenProps) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("todas");
+  const [remote, setRemote] = useState<HealthUnit[] | null>(null);
+  const [loadingUnits, setLoadingUnits] = useState(true);
+  const [offline, setOffline] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await healthUnitsApi.list();
+        if (!cancelled) {
+          setRemote(list);
+          setOffline(false);
+        }
+      } catch {
+        if (!cancelled) setOffline(true);
+      } finally {
+        if (!cancelled) setLoadingUnits(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const source = remote ?? HEALTH_UNITS;
 
   const units = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return HEALTH_UNITS.filter((u) => {
+    return source.filter((u) => {
       if (filter !== "todas" && u.kind !== filter) return false;
       if (!q) return true;
       return (
@@ -36,7 +64,7 @@ export function UbsLocatorScreen({ onClose }: UbsLocatorScreenProps) {
         u.services.some((s) => s.toLowerCase().includes(q))
       );
     }).sort((a, b) => a.distanceKm - b.distanceKm);
-  }, [query, filter]);
+  }, [source, query, filter]);
 
   return (
     <View style={styles.container}>
@@ -71,6 +99,18 @@ export function UbsLocatorScreen({ onClose }: UbsLocatorScreenProps) {
             onChangeText={setQuery}
           />
         </View>
+
+        {offline && (
+          <View style={styles.offlineNote}>
+            <Feather name="wifi-off" size={14} color={colors.orange600} />
+            <Text style={styles.offlineNoteText}>
+              Sem conexão com o servidor — exibindo a base local de exemplo.
+            </Text>
+          </View>
+        )}
+        {loadingUnits && (
+          <Text style={styles.loadingText}>Buscando unidades próximas...</Text>
+        )}
 
         {/* Filtros */}
         <View style={styles.filterRow}>
@@ -184,6 +224,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.slate500,
   },
+  offlineNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: colors.orange50,
+    borderWidth: 1,
+    borderColor: colors.orange100,
+  },
+  offlineNoteText: { flex: 1, fontSize: 12, color: colors.orange600, lineHeight: 17 },
+  loadingText: { fontSize: 12, color: colors.slate400, textAlign: "center" },
   content: {
     padding: 24,
     gap: 16,
