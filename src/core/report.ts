@@ -297,8 +297,24 @@ function blockHtml(b: ReportBlock): string {
   }
 }
 
-export function reportHtml(model: ReportModel): string {
+export type ReportHtmlOptions = {
+  /**
+   * Barra de ações no topo da página (só faz sentido no navegador): botão
+   * "Imprimir / Salvar como PDF" e dica de uso. Fica oculta na impressão.
+   */
+  toolbar?: boolean;
+};
+
+const TOOLBAR_HTML =
+  `<div class="toolbar no-print"><div><strong>Relatório pronto.</strong> ` +
+  `Para gerar o PDF, use <em>Imprimir</em> e escolha <em>Salvar como PDF</em>.</div>` +
+  `<button type="button" onclick="window.print()">Imprimir / Salvar como PDF</button></div>`;
+
+export function reportHtml(model: ReportModel, options: ReportHtmlOptions = {}): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Relatório LiberAr</title><style>
+  .toolbar{position:sticky;top:0;display:flex;justify-content:space-between;align-items:center;gap:16px;background:#0d9488;color:#fff;padding:12px 16px;margin:-32px -32px 24px;font-size:13px}
+  .toolbar button{background:#fff;color:#0f766e;border:0;border-radius:6px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;white-space:nowrap}
+  @media print{.no-print{display:none !important}}
   body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1e293b;margin:32px;font-size:12px}
   header{display:flex;justify-content:space-between;border-bottom:2px solid #0d9488;padding-bottom:10px}
   h1{font-size:18px;margin:0}.muted{color:#64748b;font-size:11px;margin:2px 0}
@@ -313,6 +329,7 @@ export function reportHtml(model: ReportModel): string {
   .bar em{display:block;height:100%;background:#14b8a6}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:4px;border-bottom:1px solid #f1f5f9}th{color:#64748b}
   .check{margin:2px 0}footer{margin-top:24px;border-top:1px solid #e2e8f0;padding-top:8px;font-size:9px;color:#94a3b8}
   </style></head><body>
+  ${options.toolbar ? TOOLBAR_HTML : ""}
   <header><div><h1>LiberAr</h1><p class="muted">Relatório de acompanhamento do tabagismo</p></div>
   <div style="text-align:right"><p class="muted">Emitido em</p><p class="strong">${formatDate(model.issuedAt)}</p></div></header>
   <p class="disclaimer">Documento gerado pelo próprio usuário a partir dos registros do aplicativo, para apoiar a consulta na unidade de saúde. <b>Não substitui avaliação, diagnóstico ou prescrição profissional.</b></p>
