@@ -12,7 +12,8 @@ import { colors } from "../theme/colors";
 export function EditProfileScreen({ onClose }: { onClose: () => void }) {
   const { profile, updateProfile } = useApp();
   const [name, setName] = useState(profile?.name ?? "");
-  const [email, setEmail] = useState(profile?.email ?? "");
+  // O e-mail é a identidade da conta na API e não muda por aqui.
+  const email = profile?.email ?? "";
   const [avatar, setAvatar] = useState(profile?.avatar ?? 47);
   const [stopReason, setStopReason] = useState<StopReason | undefined>(profile?.stopReason);
   const [mainFear, setMainFear] = useState<MainFear | undefined>(profile?.mainFear);
@@ -20,7 +21,6 @@ export function EditProfileScreen({ onClose }: { onClose: () => void }) {
   const save = async () => {
     await updateProfile({
       name: name.trim() || profile?.name,
-      email: email.trim() || profile?.email,
       avatar,
       stopReason,
       mainFear,
@@ -54,11 +54,12 @@ export function EditProfileScreen({ onClose }: { onClose: () => void }) {
         <View style={[ui.card, styles.fields]}>
           <Field label="Nome" value={name} onChangeText={setName} />
           <Field
-            label="E-mail"
+            label="E-mail (não editável)"
             value={email}
-            onChangeText={setEmail}
+            editable={false}
             autoCapitalize="none"
             keyboardType="email-address"
+            style={styles.readOnly}
           />
         </View>
 
@@ -101,6 +102,7 @@ export function EditProfileScreen({ onClose }: { onClose: () => void }) {
 }
 
 const styles = StyleSheet.create({
+  readOnly: { color: colors.slate400, backgroundColor: colors.slate50 },
   avatarSection: { alignItems: "center" },
   avatarWrap: {
     width: 96,

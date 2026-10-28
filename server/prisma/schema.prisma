@@ -1,0 +1,232 @@
+// Modelo de dados do LiberAr. Ver docs/backend-architecture.md (seção 2).
+// Enums pequenos do app (usageType, mood, etc.) são String validados por Zod.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Conta do usuário (identidade + autenticação).
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  name            String
+  passwordHash    String?
+  /// email | google | apple
+  authMethod      String    @default("email")
+  /// "google:<sub>" | "apple:<sub>" — identidade no provedor social
+  providerSubject String?   @unique
+  /// Id do avatar escolhido (i.pravatar.cc)
+  avatar          Int?
+  termsAcceptedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  profile        Profile?
+  checkIns       CheckIn[]
+  cycles         Cycle[]
+  fagerstrom     FagerstromResult[]
+  treatment      Treatment?
+  triggers       TriggerEntry[]
+  refreshTokens  RefreshToken[]
+  passwordResets PasswordReset[]
+  conversations  Conversation[]
+}
+
+/// Jornada de cessação (preenchida no onboarding).
+model Profile {
+  userId          String    @id
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Dia D — data em que parou de fumar
+  quitDate        DateTime
+  cigsPerDay      Int
+  packPrice       Float
+  cigsPerPack     Int       @default(20)
+  /// cigarro | vape | ambos
+  usageType       String    @default("cigarro")
+  /// VapeHabits { nicotineMg, juiceMl, podDays, juicePrice, coilPrice }
+  vape            Json?
+  /// abrupto | gradual
+  stopMethod      String?
+  /// lt1 | 1-5 | 5-10 | gt10
+  smokeDuration   String?
+  /// saude | familia | dinheiro | estetica | outro
+  stopReason      String?
+  stopReasonText  String?
+  /// peso | ansiedade | social | abstinencia
+  mainFear        String?
+  mainFearText    String?
+  /// Início da sequência atual após "Reiniciar minha contagem"
+  lastLapseDate   DateTime?
+  reminderEnabled Boolean   @default(false)
+  reminderHour    Int       @default(20)
+  reminderMinute  Int       @default(0)
+  /// 0 = domingo
+  reminderDays    Int[]     @default([1, 2, 3, 4, 5])
+  tourDone        Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+/// Check-in diário — um por dia (dia no fuso do aparelho).
+model CheckIn {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// AAAA-MM-DD
+  day        String
+  date       DateTime
+  /// anxious | good | hard
+  mood       String?
+  smoked     Boolean  @default(false)
+  cigarettes Int      @default(0)
+  /// 0 (não informado) a 5
+  craving    Int      @default(0)
+  symptoms   String[] @default([])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, day])
+  @@index([userId, date])
+}
+
+/// Sequência encerrada quando o usuário escolhe reiniciar a contagem.
+model Cycle {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label     String
+  days      Int
+  endedAt   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId, endedAt])
+}
+
+/// Histórico do teste de Fagerström (a API devolve o mais recente).
+model FagerstromResult {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score     Int
+  label     String
+  /// Data como exibida no app (DD/MM/AAAA)
+  date      String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+/// Tratamento em curso na UBS (Perfil > Meu Tratamento).
+model Treatment {
+  userId       String   @id
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  viaApp       Boolean?
+  ubs          String   @default("")
+  professional String   @default("")
+  /// AAAA-MM-DD ou ""
+  startDate    String   @default("")
+  adesivo      String?
+  oral         String?
+  med          String?
+  adherence    String?
+  sideEffects  String[] @default([])
+  notes        String   @default("")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+/// Diário de gatilhos.
+model TriggerEntry {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime
+  place     String?
+  emotion   String?
+  people    String?
+  /// 1 a 5
+  intensity Int
+  gaveIn    Boolean
+  note      String   @default("")
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+/// Refresh token opaco (guardado como SHA-256), rotativo.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Código de recuperação de senha (6 dígitos, hash SHA-256).
+model PasswordReset {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// Conversa com o assistente (uma ativa por usuário).
+model Conversation {
+  id        String        @id @default(uuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([userId])
+}
+
+model ChatMessage {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  /// user | assistant
+  role           String
+  text           String
+  /// claude | rules | guardrail (apenas em mensagens do assistente)
+  source         String?
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+/// Unidades de saúde (UBS/CAPS) — dados de referência carregados pelo seed.
+model HealthUnit {
+  id         String   @id
+  name       String
+  /// UBS | CAPS
+  kind       String
+  address    String
+  city       String?
+  state      String?
+  lat        Float?
+  lng        Float?
+  /// Distância de referência usada quando o cliente não envia coordenadas
+  distanceKm Float    @default(0)
+  hours      String
+  phone      String
+  services   String[] @default([])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}

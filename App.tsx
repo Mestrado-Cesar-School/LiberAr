@@ -41,38 +41,17 @@ type Overlay =
   | ProfileRoute
   | null;
 
-// Telas de acesso antes de existir um perfil.
+// Telas de acesso antes de existir um perfil (sem perfil carregado do cache
+// nem sessão válida na API).
 type AuthView = "onboarding" | "login" | "forgot";
 
 function AuthFlow() {
-  const { completeOnboarding } = useApp();
   const [view, setView] = useState<AuthView>("onboarding");
 
+  // O login e o cadastro passam pelo AppContext: quando a API devolve a
+  // sessão e o snapshot, `profile` é preenchido e o Root troca para as abas.
   if (view === "login") {
-    return (
-      <LoginScreen
-        onClose={() => setView("onboarding")}
-        onForgot={() => setView("forgot")}
-        onSuccess={(email, provider) => {
-          // Protótipo sem backend: restaura uma conta de demonstração.
-          const quit = new Date();
-          quit.setDate(quit.getDate() - 14);
-          quit.setHours(quit.getHours() - 8);
-          completeOnboarding({
-            name: "Mariana Silva",
-            email: email || (provider === "apple" ? "mariana.silva@icloud.com" : "mariana.silva@gmail.com"),
-            authMethod: provider,
-            quitDate: quit.toISOString(),
-            cigsPerDay: 15,
-            packPrice: 12.5,
-            cigsPerPack: 20,
-            usageType: "cigarro",
-            stopMethod: "abrupto",
-            tourDone: true,
-          });
-        }}
-      />
-    );
+    return <LoginScreen onClose={() => setView("onboarding")} onForgot={() => setView("forgot")} />;
   }
   if (view === "forgot") return <ForgotPasswordScreen onClose={() => setView("login")} />;
   return <OnboardingScreen onLogin={() => setView("login")} />;

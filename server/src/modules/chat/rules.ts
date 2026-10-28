@@ -1,0 +1,114 @@
+// Motor de regras do assistente — port fiel de src/core/assistant.ts do app.
+// É o fallback do chat quando não há chave do LLM, em erro de API ou recusa.
+
+import { Progress, UserProfile } from "../../domain/types";
+
+export type AssistantContext = {
+  profile: UserProfile;
+  progress: Progress;
+};
+
+type Rule = {
+  keywords: string[];
+  reply: (ctx: AssistantContext) => string;
+};
+
+const firstName = (ctx: AssistantContext) => ctx.profile.name.split(" ")[0];
+
+export const RULES: Rule[] = [
+  {
+    keywords: ["fissura", "vontade", "desejo", "cigarro agora"],
+    reply: (ctx) =>
+      `Respira comigo, ${firstName(ctx)}. A fissura é como uma onda: sobe, atinge o pico e passa em poucos minutos. ` +
+      "Tente a técnica dos 4 Ds: espere (Delay), beba água (Drink), respire fundo (Deep breathing) e se distraia (Distract). " +
+      "Se preferir, toque no botão laranja que eu te guio numa respiração agora.",
+  },
+  {
+    keywords: ["ansios", "ansiedade", "nervos", "inquiet"],
+    reply: () =>
+      "É completamente normal sentir ansiedade nessa fase — seu corpo está se reequilibrando sem a nicotina. " +
+      "Que tal 2 minutos de respiração 4-7-8? Inspire por 4s, segure por 7s e solte por 8s. " +
+      "Identificar o gatilho também ajuda: o que estava acontecendo quando a ansiedade apareceu?",
+  },
+  {
+    keywords: ["fumei", "recaída", "recai", "falhei", "errei"],
+    reply: (ctx) =>
+      `${firstName(ctx)}, um deslize não apaga o caminho que você já percorreu — são ${ctx.progress.days} dias de aprendizado. ` +
+      "Na TCC chamamos isso de lapso, não de fracasso. O importante é entender o gatilho e seguir em frente hoje mesmo. " +
+      "Registre no check-in diário, sem culpa. Amanhã o contador continua com você.",
+  },
+  {
+    keywords: ["triste", "deprimi", "sozinho", "desisto", "não aguento"],
+    reply: () =>
+      "Sinto muito que você esteja passando por isso. Você não está sozinho nessa caminhada. " +
+      "Se a tristeza apertar, o CVV atende 24h no telefone 188 — é gratuito e sigiloso. " +
+      "E que tal procurar o grupo de apoio do PNCT na UBS mais próxima? Posso te mostrar o caminho na aba Explorar.",
+  },
+  {
+    keywords: ["economi", "dinheiro", "quanto"],
+    reply: (ctx) =>
+      `Até agora você já economizou R$ ${ctx.progress.moneySaved.toFixed(2).replace(".", ",")} e evitou ` +
+      `${ctx.progress.cigsAvoided} cigarros. Que tal planejar uma recompensa com parte desse valor? Celebrar vitórias é parte do tratamento!`,
+  },
+  {
+    keywords: ["respira", "exercício", "acalmar"],
+    reply: () =>
+      "Vamos lá! Exercício da respiração quadrada: inspire contando até 4, segure 4, expire 4 e pause 4. " +
+      "Repita 5 ciclos. Ela ativa o sistema nervoso parassimpático e reduz a fissura em poucos minutos.",
+  },
+  {
+    keywords: ["sono", "insôn", "insonia", "dormir", "dorm"],
+    reply: () =>
+      "Alterações no sono são comuns nas 2 primeiras semanas. Evite cafeína depois das 15h e crie um ritual antes de dormir.",
+  },
+  {
+    keywords: ["peso", "engord", "fome", "apetite"],
+    reply: () =>
+      "Ganho de peso costuma ser leve (2 a 4 kg) e reversível. Hidratação, chás sem açúcar e caminhadas curtas ajudam a compensar.",
+  },
+  {
+    keywords: ["remédi", "remedi", "medic", "adesivo", "bupropi", "goma", "pastilha"],
+    reply: () =>
+      "As dúvidas sobre medicamento devem ir para o profissional da UBS. Você pode registrar tudo em Perfil > Meu Tratamento e levar no relatório.",
+  },
+  {
+    keywords: ["motiv", "desanim", "difícil", "dificil", "cansad"],
+    reply: () =>
+      "Você já ganhou dinheiro e tempo de vida. Abra a Home e olhe a sua contagem — é prova de que já mudou. E lembre-se do seu motivo (Perfil > Editar Perfil).",
+  },
+  {
+    keywords: ["obrigad", "valeu", "brigad"],
+    reply: () => "Estou aqui sempre que precisar. Continue firme.",
+  },
+];
+
+export const DEFAULT_REPLIES = [
+  (ctx: AssistantContext) =>
+    `Você está há ${ctx.progress.days} dias e ${ctx.progress.hours} horas livre do cigarro, ${firstName(ctx)} — cada hora conta! ` +
+    "Como você está se sentindo agora? Posso te ajudar com técnicas de respiração, dicas contra a fissura ou só conversar.",
+  (ctx: AssistantContext) =>
+    `Estou aqui por você, ${firstName(ctx)}. Me conte mais: é uma vontade de fumar, ansiedade, ou só bateu aquele momento difícil? ` +
+    "Juntos a gente encontra uma estratégia.",
+];
+
+/** Resposta neutra quando o usuário ainda não tem perfil/jornada. */
+export const NEUTRAL_REPLY =
+  "Estou aqui por você. Me conte mais sobre como está se sentindo — posso te ajudar com técnicas de respiração, dicas contra a fissura ou só conversar.";
+
+/** Gera a resposta do assistente com as regras locais (sem LLM). */
+export function generateReply(userText: string, ctx: AssistantContext | null): string {
+  if (!ctx) return NEUTRAL_REPLY;
+  const text = userText.toLowerCase();
+  for (const rule of RULES) {
+    if (rule.keywords.some((k) => text.includes(k))) return rule.reply(ctx);
+  }
+  const pick = userText.length % DEFAULT_REPLIES.length;
+  return DEFAULT_REPLIES[pick](ctx);
+}
+
+export function welcomeMessage(ctx: AssistantContext): string {
+  return (
+    `Olá ${firstName(ctx)}! Como você está lidando com a vontade hoje? ` +
+    `Já são ${ctx.progress.days} dias de liberdade — cada dia é uma vitória. Estou aqui se precisar conversar.`
+  );
+}
