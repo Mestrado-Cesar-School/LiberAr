@@ -61,6 +61,9 @@ export type UserProfile = {
   tourDone?: boolean;
 };
 
+/** Jornada sem a identidade (name/email/authMethod vivem na conta do servidor). */
+export type UserProfileInput = Omit<UserProfile, "name" | "email" | "authMethod">;
+
 export type Mood = "anxious" | "good" | "hard";
 
 export type CheckIn = {
@@ -77,6 +80,8 @@ export type CheckIn = {
 
 /** Sequência encerrada quando o usuário escolhe reiniciar a contagem. */
 export type Cycle = {
+  /** Id no servidor (ausente em registros criados offline). */
+  id?: string;
   label: string;
   days: number;
   endedAt: string;
@@ -103,6 +108,8 @@ export type Treatment = {
 };
 
 export type TriggerEntry = {
+  /** Id no servidor (ausente em registros criados offline). */
+  id?: string;
   date: string;
   place: string | null;
   emotion: string | null;

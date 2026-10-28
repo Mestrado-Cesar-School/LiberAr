@@ -1,15 +1,17 @@
-import React from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { Toggle } from "../components/ui";
 import { useApp } from "../context/AppContext";
 import { cancelDailyReminder, requestPermission, scheduleReminders } from "../core/notifications";
 import { pad2 } from "../core/progressEngine";
+import { describeError } from "../data/api";
 import { avatarUri } from "../data/clinical";
 import { colors } from "../theme/colors";
 
-// Módulo de Perfil (diagrama: Camada de Apresentação). O logout aciona o
-// direito ao esquecimento: limpa os dados locais e volta ao onboarding.
+// Módulo de Perfil (diagrama: Camada de Apresentação). "Sair da Conta" revoga
+// a sessão na API e limpa os dados locais; "Excluir minha conta e dados"
+// exerce o direito ao esquecimento (LGPD): apaga tudo também no servidor.
 
 export type ProfileRoute = "edit-profile" | "triggers" | "treatment" | "report" | "terms" | "reminder";
 
@@ -34,7 +36,36 @@ function MenuItem({ icon, iconColor, label, onPress, last }: MenuItemProps) {
 }
 
 export function ProfileScreen({ onNavigate }: { onNavigate: (route: ProfileRoute) => void }) {
-  const { profile, cycles, updateProfile, logout } = useApp();
+  const { profile, cycles, updateProfile, logout, deleteAccount, online, pendingOps } = useApp();
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const doLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await logout();
+  };
+
+  const doDelete = async () => {
+    if (deleting) return;
+    setDeleteError(null);
+    setDeleting(true);
+    try {
+      await deleteAccount();
+    } catch (e) {
+      setDeleteError(describeError(e));
+      setDeleting(false);
+    }
+  };
+
+  const syncLabel = !online
+    ? "Sem conexão — as alterações serão sincronizadas depois"
+    : pendingOps > 0
+      ? `Sincronização pendente (${pendingOps})`
+      : null;
+
   const reminderOn = profile?.reminderEnabled ?? false;
   const hour = profile?.reminderHour ?? 20;
   const minute = profile?.reminderMinute ?? 0;
@@ -69,6 +100,12 @@ export function ProfileScreen({ onNavigate }: { onNavigate: (route: ProfileRoute
           <Text style={styles.name}>{profile?.name ?? "Visitante"}</Text>
           <Text style={styles.email}>{profile?.email ?? ""}</Text>
         </View>
+        {syncLabel && (
+          <View style={styles.syncPill}>
+            <Feather name={online ? "refresh-cw" : "wifi-off"} size={12} color={colors.orange600} />
+            <Text style={styles.syncText}>{syncLabel}</Text>
+          </View>
+        )}
       </View>
 
       {/* Lembrete de check-in */}
@@ -125,12 +162,59 @@ export function ProfileScreen({ onNavigate }: { onNavigate: (route: ProfileRoute
       </View>
 
       <View style={styles.menuCard}>
-        <Pressable style={styles.logoutItem} onPress={logout}>
+        <Pressable style={styles.logoutItem} onPress={doLogout} disabled={loggingOut}>
           <View style={styles.logoutIconWrap}>
-            <Feather name="log-out" size={20} color={colors.rose500} />
+            {loggingOut ? (
+              <ActivityIndicator size="small" color={colors.rose500} />
+            ) : (
+              <Feather name="log-out" size={20} color={colors.rose500} />
+            )}
           </View>
-          <Text style={styles.logoutLabel}>Sair da Conta</Text>
+          <Text style={styles.logoutLabel}>{loggingOut ? "Saindo..." : "Sair da Conta"}</Text>
         </Pressable>
+      </View>
+
+      {/* LGPD — direito ao esquecimento, com confirmação em duas etapas (funciona na web) */}
+      <View style={styles.menuCard}>
+        {!confirmDelete ? (
+          <Pressable style={styles.logoutItem} onPress={() => setConfirmDelete(true)}>
+            <View style={styles.deleteIconWrap}>
+              <Feather name="trash-2" size={20} color={colors.slate500} />
+            </View>
+            <View style={styles.deleteBody}>
+              <Text style={styles.deleteLabel}>Excluir minha conta e dados</Text>
+              <Text style={styles.deleteHint}>Apaga tudo no servidor e no aparelho (LGPD)</Text>
+            </View>
+          </Pressable>
+        ) : (
+          <View style={styles.deleteConfirm}>
+            <Text style={styles.deleteConfirmTitle}>Excluir sua conta definitivamente?</Text>
+            <Text style={styles.deleteConfirmText}>
+              Seu perfil, check-ins, histórico de conversas e relatórios serão apagados do
+              servidor e deste aparelho. Essa ação não pode ser desfeita.
+            </Text>
+            {deleteError && <Text style={styles.deleteError}>{deleteError}</Text>}
+            <View style={styles.deleteActions}>
+              <Pressable
+                style={styles.deleteCancel}
+                onPress={() => {
+                  setConfirmDelete(false);
+                  setDeleteError(null);
+                }}
+                disabled={deleting}
+              >
+                <Text style={styles.deleteCancelText}>Cancelar</Text>
+              </Pressable>
+              <Pressable style={styles.deleteButton} onPress={doDelete} disabled={deleting}>
+                {deleting ? (
+                  <ActivityIndicator size="small" color={colors.white} />
+                ) : (
+                  <Text style={styles.deleteButtonText}>Excluir definitivamente</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        )}
       </View>
     </ScrollView>
   );
@@ -227,6 +311,45 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: "hidden",
   },
+  syncPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: colors.orange50,
+    borderWidth: 1,
+    borderColor: colors.orange100,
+  },
+  syncText: { fontSize: 11, fontWeight: "600", color: colors.orange600 },
+  deleteIconWrap: { backgroundColor: colors.slate100, padding: 8, borderRadius: 12 },
+  deleteBody: { flex: 1 },
+  deleteLabel: { fontSize: 14, fontWeight: "600", color: colors.slate700 },
+  deleteHint: { fontSize: 11, color: colors.slate400, marginTop: 2 },
+  deleteConfirm: { padding: 16, gap: 10 },
+  deleteConfirmTitle: { fontSize: 15, fontWeight: "700", color: colors.slate800 },
+  deleteConfirmText: { fontSize: 12, color: colors.slate500, lineHeight: 18 },
+  deleteError: { fontSize: 12, color: colors.rose500, fontWeight: "600" },
+  deleteActions: { flexDirection: "row", gap: 10, marginTop: 4 },
+  deleteCancel: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.slate200,
+    alignItems: "center",
+  },
+  deleteCancelText: { fontSize: 13, fontWeight: "600", color: colors.slate600 },
+  deleteButton: {
+    flex: 1.4,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: colors.rose500,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  deleteButtonText: { fontSize: 13, fontWeight: "700", color: colors.white },
   logoutItem: { flexDirection: "row", alignItems: "center", gap: 16, padding: 16 },
   logoutIconWrap: { backgroundColor: colors.rose50, padding: 8, borderRadius: 12 },
   logoutLabel: { fontSize: 14, fontWeight: "600", color: colors.rose500 },

@@ -16,6 +16,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { PrimaryButton, SelectCard } from "../components/ui";
 import { useApp } from "../context/AppContext";
 import { pad2 } from "../core/progressEngine";
+import { ApiError, auth as authApi, describeError, NetworkError } from "../data/api";
+import { socialLoginMessage } from "./LoginScreen";
 import {
   AuthMethod,
   MainFear,
@@ -37,6 +39,8 @@ import { colors } from "../theme/colors";
 // Módulo de Onboarding & Perfil (fluxo 1 do diagrama):
 // boas-vindas → cadastro → motivação (3 perguntas) → termos/LGPD →
 // o que você usa → hábitos → como pretende parar → Dia D.
+// A conta só é criada na API no último passo (POST /auth/register); na etapa
+// de cadastro o e-mail é conferido em POST /auth/check-email.
 
 const TOTAL_STEPS = 7; // etapas com indicador de progresso (1..7)
 
@@ -118,6 +122,9 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [emailTaken, setEmailTaken] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
   const pwHasLength = password.length >= 8;
   const pwHasLetter = /[a-zA-Z]/.test(password);
   const pwHasNumber = /[0-9]/.test(password);
@@ -152,14 +159,17 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
   const [quitTime, setQuitTime] = useState("");
   const quitTimestamp = parseDateTime(quitDate, quitTime);
 
-  const finish = () => {
-    if (!quitTimestamp) return;
+  // Último passo: cria a conta + jornada na API.
+  const [submitting, setSubmitting] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
+
+  const finish = async () => {
+    if (!quitTimestamp || submitting) return;
     const usesVape = usageType === "vape" || usageType === "ambos";
-    completeOnboarding({
-      name: name.trim() || (authMethod === "email" ? "Visitante" : "Mariana Silva"),
-      email:
-        email.trim() ||
-        (authMethod === "apple" ? "mariana.silva@icloud.com" : "mariana.silva@gmail.com"),
+    const cleanEmail = email.trim().toLowerCase();
+    const profile = {
+      name: name.trim(),
+      email: cleanEmail,
       authMethod: authMethod ?? "email",
       quitDate: quitTimestamp.toISOString(),
       cigsPerDay,
@@ -182,10 +192,60 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
       mainFear: mainFear ?? undefined,
       mainFearText: mainFearText.trim() || undefined,
       tourDone: false,
-    });
+    } as const;
+    setFinishError(null);
+    setSubmitting(true);
+    try {
+      await completeOnboarding(profile, { name: name.trim(), email: cleanEmail, password });
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "EMAIL_TAKEN") {
+        setEmailTaken(true);
+        setAuthError("Este e-mail já está cadastrado");
+        setStep(1);
+      } else if (e instanceof NetworkError) {
+        setFinishError("Sem conexão. Verifique a API em EXPO_PUBLIC_API_URL e tente novamente.");
+      } else {
+        setFinishError(describeError(e));
+      }
+      setSubmitting(false);
+    }
+  };
+
+  /** Etapa 1 (e-mail): confere na API se o e-mail está livre antes de seguir. */
+  const checkEmailAndContinue = async () => {
+    if (checkingEmail) return;
+    setAuthError(null);
+    setEmailTaken(false);
+    setCheckingEmail(true);
+    try {
+      const { available } = await authApi.checkEmail(email.trim().toLowerCase());
+      if (!available) {
+        setEmailTaken(true);
+        setAuthError("Este e-mail já está cadastrado");
+        return;
+      }
+    } catch (e) {
+      // Sem rede, segue: o registro no último passo vai tratar.
+      if (!(e instanceof NetworkError)) {
+        setAuthError(describeError(e));
+        return;
+      }
+    } finally {
+      setCheckingEmail(false);
+    }
+    setStep(2);
+  };
+
+  const chooseSocial = (provider: "google" | "apple") => {
+    setEmailTaken(false);
+    setAuthError(socialLoginMessage(provider));
   };
 
   const nextStep = () => {
+    if (step === 1) {
+      if (authMethod === "email") void checkEmailAndContinue();
+      return;
+    }
     if (step === 2 && motivSubStep < 2) {
       setMotivSubStep((s) => s + 1);
       return;
@@ -199,7 +259,7 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
       setQuitTime(fmtTime(new Date()));
     }
     if (step < TOTAL_STEPS) setStep(step + 1);
-    else finish();
+    else void finish();
   };
 
   const prevStep = () => {
@@ -211,7 +271,9 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
   };
 
   const disabled =
-    (step === 1 && (authMethod === null || (authMethod === "email" && (!pwValid || !email.includes("@") || name.trim().length < 2)))) ||
+    submitting ||
+    checkingEmail ||
+    (step === 1 && (authMethod !== "email" || !pwValid || !/\S+@\S+\.\S+/.test(email) || name.trim().length < 2)) ||
     (step === 2 && motivSubStep === 0 && !smokeDuration) ||
     (step === 2 && motivSubStep === 1 && !stopReason) ||
     (step === 2 && motivSubStep === 2 && !mainFear) ||
@@ -283,7 +345,7 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
             {authMethod !== "email" && (
               <View style={styles.gap12}>
                 <Pressable
-                  onPress={() => setAuthMethod("google")}
+                  onPress={() => chooseSocial("google")}
                   style={[styles.googleButton, authMethod === "google" && styles.googleButtonActive]}
                 >
                   <FontAwesome name="google" size={18} color={authMethod === "google" ? colors.teal800 : colors.slate700} />
@@ -292,7 +354,7 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
                   </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setAuthMethod("apple")}
+                  onPress={() => chooseSocial("apple")}
                   style={[styles.appleButton, authMethod === "apple" && styles.appleButtonActive]}
                 >
                   <FontAwesome name="apple" size={20} color={colors.white} />
@@ -325,7 +387,11 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
                   autoCapitalize="none"
                   keyboardType="email-address"
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={(t) => {
+                    setEmail(t);
+                    setAuthError(null);
+                    setEmailTaken(false);
+                  }}
                   onFocus={() => setAuthMethod("email")}
                 />
                 {authMethod === "email" && (
@@ -367,6 +433,18 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
                 <Pressable onPress={() => setAuthMethod(null)} hitSlop={8}>
                   <Text style={styles.switchLink}>Trocar</Text>
                 </Pressable>
+              </View>
+            )}
+
+            {authError && (
+              <View style={styles.authErrorBox}>
+                <Feather name="alert-circle" size={14} color={colors.rose500} />
+                <Text style={styles.authErrorText}>{authError}</Text>
+                {emailTaken && (
+                  <Pressable onPress={onLogin} hitSlop={8}>
+                    <Text style={styles.authErrorLink}>Entrar</Text>
+                  </Pressable>
+                )}
               </View>
             )}
 
@@ -610,6 +688,12 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
             {quitDate.length === 10 && quitTime.length === 5 && !quitTimestamp && (
               <Text style={styles.errorText}>Data ou horário inválido.</Text>
             )}
+            {finishError && (
+              <View style={styles.authErrorBox}>
+                <Feather name="alert-circle" size={14} color={colors.rose500} />
+                <Text style={styles.authErrorText}>{finishError}</Text>
+              </View>
+            )}
 
             <View style={styles.tipCard}>
               <Feather name="info" size={22} color={colors.blue500} />
@@ -627,7 +711,17 @@ export function OnboardingScreen({ onLogin }: OnboardingScreenProps) {
 
       <View style={styles.footer}>
         <PrimaryButton
-          label={step === 7 ? "Começar jornada" : step === 3 ? "Concluir Cadastro" : "Continuar"}
+          label={
+            submitting
+              ? "Criando sua conta..."
+              : checkingEmail
+                ? "Verificando..."
+                : step === 7
+                  ? "Começar jornada"
+                  : step === 3
+                    ? "Concluir Cadastro"
+                    : "Continuar"
+          }
           onPress={nextStep}
           disabled={disabled}
         />
@@ -838,6 +932,16 @@ const styles = StyleSheet.create({
     color: colors.slate700,
   },
   errorText: { fontSize: 12, color: colors.rose500 },
+  authErrorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: colors.rose50,
+  },
+  authErrorText: { flex: 1, fontSize: 12, color: colors.rose500, fontWeight: "600" },
+  authErrorLink: { fontSize: 12, color: colors.teal600, fontWeight: "700" },
   tipCard: {
     flexDirection: "row",
     gap: 12,

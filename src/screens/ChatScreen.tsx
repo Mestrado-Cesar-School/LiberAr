@@ -17,13 +17,16 @@ import {
   QUICK_REPLIES,
   welcomeMessage,
 } from "../core/assistant";
+import { chat as chatApi, NetworkError } from "../data/api";
 import { colors } from "../theme/colors";
 
-// Interface do Chatbot Empático (fluxo 3 do diagrama). As respostas passam
-// pelo Controlador de Contexto & Guardrails em src/core/assistant.ts.
+// Interface do Chatbot Empático (fluxo 3 do diagrama). As respostas vêm da
+// API (POST /me/chat/messages — Claude com guardrails de TCC e fallback por
+// regras no servidor); sem rede, o app usa o motor de regras local de
+// src/core/assistant.ts e sinaliza o modo offline.
 
 type Message = {
-  id: number;
+  id: string;
   from: "ai" | "user";
   text: string;
 };
@@ -37,9 +40,10 @@ function AiAvatar({ size }: { size: number }) {
 }
 
 export function ChatScreen() {
-  const { profile, progress } = useApp();
+  const { profile, progress, session } = useApp();
   const scrollRef = useRef<ScrollView>(null);
   const nextId = useRef(2);
+  const localId = () => `local-${nextId.current++}`;
 
   const ctx: AssistantContext | null = useMemo(
     () => (profile && progress ? { profile, progress } : null),
@@ -48,7 +52,7 @@ export function ChatScreen() {
 
   const [messages, setMessages] = useState<Message[]>(() => [
     {
-      id: 1,
+      id: "welcome",
       from: "ai",
       text: ctx
         ? welcomeMessage(ctx)
@@ -57,25 +61,60 @@ export function ChatScreen() {
   ]);
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
+  // true quando a última tentativa de falar com a API falhou por rede.
+  const [offline, setOffline] = useState(false);
+
+  // Histórico persistido no servidor (uma conversa por usuário).
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { messages: history } = await chatApi.get();
+        if (cancelled || history.length === 0) return;
+        setMessages(
+          history.map((m) => ({ id: m.id, from: m.role === "assistant" ? "ai" : "user", text: m.text }))
+        );
+        setOffline(false);
+      } catch (e) {
+        if (!cancelled && e instanceof NetworkError) setOffline(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages, typing]);
 
-  const send = (raw?: string) => {
+  const localReply = (text: string) =>
+    ctx ? generateReply(text, ctx) : "Estou aqui por você. Me conte mais sobre como está se sentindo.";
+
+  const send = async (raw?: string) => {
     const text = (raw ?? draft).trim();
     if (!text || typing) return;
     setDraft("");
-    setMessages((prev) => [...prev, { id: nextId.current++, from: "user", text }]);
+    const userId = localId();
+    setMessages((prev) => [...prev, { id: userId, from: "user", text }]);
     setTyping(true);
-    // Simula a latência da API de LLM; em produção a chamada real entra aqui.
-    setTimeout(() => {
-      const reply = ctx
-        ? generateReply(text, ctx)
-        : "Estou aqui por você. Me conte mais sobre como está se sentindo.";
-      setMessages((prev) => [...prev, { id: nextId.current++, from: "ai", text: reply }]);
+    try {
+      if (!session) throw new NetworkError();
+      const reply = await chatApi.send(text);
+      setOffline(false);
+      setMessages((prev) => [
+        ...prev.map((m) => (m.id === userId ? { ...m, id: reply.userMessage.id } : m)),
+        { id: reply.assistantMessage.id, from: "ai", text: reply.assistantMessage.text },
+      ]);
+    } catch (e) {
+      // Sem API: Controlador de Contexto & Guardrails local (mesmas regras de TCC).
+      if (e instanceof NetworkError) setOffline(true);
+      await new Promise((r) => setTimeout(r, 600));
+      setMessages((prev) => [...prev, { id: localId(), from: "ai", text: localReply(text) }]);
+    } finally {
       setTyping(false);
-    }, 900);
+    }
   };
 
   return (
@@ -94,6 +133,13 @@ export function ChatScreen() {
           <Text style={styles.headerSubtitle}>Sempre aqui por você</Text>
         </View>
       </View>
+
+      {offline && (
+        <View style={styles.offlineBar}>
+          <Feather name="wifi-off" size={12} color={colors.orange600} />
+          <Text style={styles.offlineText}>Modo offline — respostas locais</Text>
+        </View>
+      )}
 
       {/* Mensagens */}
       <ScrollView
@@ -181,6 +227,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
+  offlineBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 6,
+    backgroundColor: colors.orange50,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.orange100,
+  },
+  offlineText: { fontSize: 11, fontWeight: "600", color: colors.orange600 },
   aiAvatar: {
     backgroundColor: colors.blue100,
     borderRadius: 999,
